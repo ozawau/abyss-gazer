@@ -12,6 +12,9 @@ const BREAK_SECONDS = 5 * 60;
 
 interface PomodoroViewProps {
   selectedTask: Task | null;
+  /** Increment to engage: switch task already applied; continue focus or start new. */
+  playToken?: number;
+  onSessionsChanged?: () => void;
 }
 
 type TimerPhase = SessionKind;
@@ -31,7 +34,11 @@ function plannedFor(phase: TimerPhase): number {
   return phase === "focus" ? FOCUS_SECONDS : BREAK_SECONDS;
 }
 
-export function PomodoroView({ selectedTask }: PomodoroViewProps) {
+export function PomodoroView({
+  selectedTask,
+  playToken = 0,
+  onSessionsChanged,
+}: PomodoroViewProps) {
   const [phase, setPhase] = useState<TimerPhase>("focus");
   const [status, setStatus] = useState<TimerStatus>("idle");
   const [remaining, setRemaining] = useState(FOCUS_SECONDS);
@@ -45,6 +52,8 @@ export function PomodoroView({ selectedTask }: PomodoroViewProps) {
   const plannedRef = useRef(FOCUS_SECONDS);
   const finishingRef = useRef(false);
   const selectedTaskRef = useRef(selectedTask);
+  const sessionTaskIdRef = useRef<string | null>(null);
+  const lastPlayTokenRef = useRef(0);
 
   phaseRef.current = phase;
   statusRef.current = status;
@@ -69,23 +78,24 @@ export function PomodoroView({ selectedTask }: PomodoroViewProps) {
     };
   }, [selectedTask?.id]);
 
-  async function persistSession(completed: boolean) {
-    const task = selectedTaskRef.current;
-    if (!task || startedAtRef.current == null) return;
+  async function persistSession(completed: boolean, taskId?: string | null) {
+    const id = taskId ?? sessionTaskIdRef.current ?? selectedTaskRef.current?.id;
+    if (!id || startedAtRef.current == null) return;
     const endedAt = Date.now();
     const kind = phaseRef.current;
     try {
       await recordPomodoroSession({
-        task_id: task.id,
+        task_id: id,
         kind,
         planned_seconds: plannedRef.current,
         started_at: startedAtRef.current,
         ended_at: endedAt,
         completed,
       });
+      onSessionsChanged?.();
       if (completed && kind === "focus") {
-        const n = await countFocusSessionsSince(task.id, startOfLocalDayMs());
-        setTodayCount(n);
+        const n = await countFocusSessionsSince(id, startOfLocalDayMs());
+        if (selectedTaskRef.current?.id === id) setTodayCount(n);
       }
     } catch (err) {
       setError(String(err));
@@ -98,6 +108,7 @@ export function PomodoroView({ selectedTask }: PomodoroViewProps) {
     setStatus("idle");
     await persistSession(completed);
     startedAtRef.current = null;
+    sessionTaskIdRef.current = null;
 
     const nextPhase: TimerPhase =
       phaseRef.current === "focus" ? "break" : "focus";
@@ -130,6 +141,7 @@ export function PomodoroView({ selectedTask }: PomodoroViewProps) {
     setError(null);
     if (statusRef.current === "idle") {
       startedAtRef.current = Date.now();
+      sessionTaskIdRef.current = selectedTaskRef.current.id;
       plannedRef.current = plannedFor(phaseRef.current);
       if (remainingRef.current <= 0) {
         setRemaining(plannedRef.current);
@@ -161,12 +173,56 @@ export function PomodoroView({ selectedTask }: PomodoroViewProps) {
       await persistSession(false);
     }
     startedAtRef.current = null;
+    sessionTaskIdRef.current = null;
     finishingRef.current = false;
     setStatus("idle");
     setPhase("focus");
     plannedRef.current = FOCUS_SECONDS;
     setRemaining(FOCUS_SECONDS);
   }
+
+  useEffect(() => {
+    if (!playToken || playToken === lastPlayTokenRef.current) return;
+    lastPlayTokenRef.current = playToken;
+
+    const task = selectedTaskRef.current;
+    if (!task) return;
+
+    const continuingFocus =
+      phaseRef.current === "focus" && statusRef.current === "running";
+
+    if (continuingFocus) {
+      if (
+        sessionTaskIdRef.current &&
+        sessionTaskIdRef.current !== task.id &&
+        startedAtRef.current != null
+      ) {
+        const previousId = sessionTaskIdRef.current;
+        void persistSession(false, previousId).then(() => {
+          startedAtRef.current = Date.now();
+          sessionTaskIdRef.current = task.id;
+        });
+      } else {
+        sessionTaskIdRef.current = task.id;
+      }
+      setError(null);
+      return;
+    }
+
+    void (async () => {
+      setError(null);
+      finishingRef.current = false;
+      if (startedAtRef.current != null) {
+        await persistSession(false);
+      }
+      startedAtRef.current = Date.now();
+      sessionTaskIdRef.current = task.id;
+      setPhase("focus");
+      plannedRef.current = FOCUS_SECONDS;
+      setRemaining(FOCUS_SECONDS);
+      setStatus("running");
+    })();
+  }, [playToken]);
 
   const progress =
     plannedRef.current > 0 ? 1 - remaining / plannedRef.current : 0;

@@ -1,13 +1,26 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type TaskStatus = "todo" | "done";
+export type TaskPriority = "high" | "medium" | "low";
 export type SessionKind = "focus" | "break";
+
+export interface Category {
+  id: string;
+  name: string;
+  color: string;
+  created_at: number;
+}
 
 export interface Task {
   id: string;
   title: string;
   notes: string;
   status: TaskStatus;
+  priority: TaskPriority;
+  sort_order: number;
+  category_id: string | null;
+  estimate_pomodoros: number;
+  completed_pomodoros: number;
   created_at: number;
   updated_at: number;
 }
@@ -26,8 +39,22 @@ export function listTasks(): Promise<Task[]> {
   return invoke("list_tasks");
 }
 
-export function createTask(title: string, notes = ""): Promise<Task> {
-  return invoke("create_task", { input: { title, notes } });
+export function createTask(input: {
+  title: string;
+  notes?: string;
+  priority?: TaskPriority;
+  category_id?: string | null;
+  estimate_pomodoros?: number;
+}): Promise<Task> {
+  return invoke("create_task", {
+    input: {
+      title: input.title,
+      notes: input.notes ?? "",
+      priority: input.priority ?? "medium",
+      category_id: input.category_id ?? null,
+      estimate_pomodoros: input.estimate_pomodoros ?? 0,
+    },
+  });
 }
 
 export function updateTask(input: {
@@ -35,8 +62,34 @@ export function updateTask(input: {
   title?: string;
   notes?: string;
   status?: TaskStatus;
+  priority?: TaskPriority;
+  category_id?: string | null;
+  estimate_pomodoros?: number;
 }): Promise<Task> {
-  return invoke("update_task", { input });
+  const payload: Record<string, unknown> = { id: input.id };
+  if (input.title !== undefined) payload.title = input.title;
+  if (input.notes !== undefined) payload.notes = input.notes;
+  if (input.status !== undefined) payload.status = input.status;
+  if (input.priority !== undefined) payload.priority = input.priority;
+  if (input.category_id !== undefined) payload.category_id = input.category_id;
+  if (input.estimate_pomodoros !== undefined) {
+    payload.estimate_pomodoros = input.estimate_pomodoros;
+  }
+  return invoke("update_task", { input: payload });
+}
+
+export function reorderTask(input: {
+  id: string;
+  priority: TaskPriority;
+  before_id?: string | null;
+}): Promise<Task[]> {
+  return invoke("reorder_task", {
+    input: {
+      id: input.id,
+      priority: input.priority,
+      before_id: input.before_id ?? null,
+    },
+  });
 }
 
 export function deleteTask(id: string): Promise<void> {
@@ -45,6 +98,26 @@ export function deleteTask(id: string): Promise<void> {
 
 export function getTask(id: string): Promise<Task> {
   return invoke("get_task", { id });
+}
+
+export function listCategories(): Promise<Category[]> {
+  return invoke("list_categories");
+}
+
+export function createCategory(name: string, color: string): Promise<Category> {
+  return invoke("create_category", { input: { name, color } });
+}
+
+export function updateCategory(input: {
+  id: string;
+  name?: string;
+  color?: string;
+}): Promise<Category> {
+  return invoke("update_category", { input });
+}
+
+export function deleteCategory(id: string): Promise<void> {
+  return invoke("delete_category", { id });
 }
 
 export function recordPomodoroSession(input: {

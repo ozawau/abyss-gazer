@@ -12,6 +12,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dbPath, setDbPath] = useState<string | null>(null);
+  const [pomodoroPlayToken, setPomodoroPlayToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +40,12 @@ function App() {
     [tasks, selectedTaskId],
   );
 
+  function startPomodoroForTask(taskId: string) {
+    setSelectedTaskId(taskId);
+    setActiveView("pomodoro");
+    setPomodoroPlayToken((n) => n + 1);
+  }
+
   return (
     <div className="shell">
       <Sidebar
@@ -56,11 +63,25 @@ function App() {
             selectedTaskId={selectedTaskId}
             onSelectTask={setSelectedTaskId}
             onTasksChange={setTasks}
+            onStartPomodoro={startPomodoroForTask}
           />
         )}
-        {activeView === "pomodoro" && (
-          <PomodoroView selectedTask={selectedTask} />
-        )}
+        <div
+          className={
+            activeView === "pomodoro" ? "view-slot" : "view-slot is-hidden"
+          }
+          aria-hidden={activeView !== "pomodoro"}
+        >
+          <PomodoroView
+            selectedTask={selectedTask}
+            playToken={pomodoroPlayToken}
+            onSessionsChanged={() => {
+              void listTasks()
+                .then(setTasks)
+                .catch((err) => setLoadError(String(err)));
+            }}
+          />
+        </div>
       </main>
     </div>
   );
