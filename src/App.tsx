@@ -6,7 +6,7 @@ import { NAV_ITEMS, ViewId } from "./lib/nav";
 import type { TasksSubPage } from "./lib/tasksNav";
 import { CompletedTasksView } from "./views/CompletedTasksView";
 import { PomodoroView } from "./views/PomodoroView";
-import { TasksView } from "./views/TasksView";
+import { CategoryFilter, TasksView } from "./views/TasksView";
 import "./styles/app.css";
 
 function App() {
@@ -17,9 +17,14 @@ function App() {
   );
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [pomodoroTaskId, setPomodoroTaskId] = useState<string | null>(null);
+  const [pomodoroTiming, setPomodoroTiming] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dbPath, setDbPath] = useState<string | null>(null);
   const [pomodoroPlayToken, setPomodoroPlayToken] = useState(0);
+  const [pomodoroFullscreen, setPomodoroFullscreen] = useState(false);
+  const [tasksCategoryFilter, setTasksCategoryFilter] =
+    useState<CategoryFilter>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -47,10 +52,23 @@ function App() {
     [tasks, selectedTaskId],
   );
 
+  const pomodoroTask = useMemo(
+    () => tasks.find((t) => t.id === pomodoroTaskId) ?? null,
+    [tasks, pomodoroTaskId],
+  );
+
   const showTasksSubNav = activeView === "tasks" && !!subNavOpen.tasks;
+
+  function handleSelectTask(id: string | null) {
+    setSelectedTaskId(id);
+    if (!pomodoroTiming) {
+      setPomodoroTaskId(id);
+    }
+  }
 
   function startPomodoroForTask(taskId: string) {
     setSelectedTaskId(taskId);
+    setPomodoroTaskId(taskId);
     setActiveView("pomodoro");
     setPomodoroPlayToken((n) => n + 1);
   }
@@ -58,6 +76,7 @@ function App() {
   function handleNavigate(id: ViewId) {
     setActiveView(id);
     if (id === "tasks") setTasksSubPage("active");
+    if (id !== "pomodoro") setPomodoroFullscreen(false);
   }
 
   function handleToggleSubNav(id: ViewId) {
@@ -68,32 +87,45 @@ function App() {
     }
   }
 
+  const immersivePomodoro =
+    activeView === "pomodoro" && pomodoroFullscreen;
+
   return (
-    <div className={`shell${showTasksSubNav ? "" : " no-subnav"}`}>
-      <Sidebar
-        items={NAV_ITEMS}
-        activeView={activeView}
-        onNavigate={handleNavigate}
-        selectedTaskTitle={selectedTask?.title ?? null}
-        dbPath={dbPath}
-        subNavOpen={subNavOpen}
-        onToggleSubNav={handleToggleSubNav}
-      />
-      {showTasksSubNav && (
+    <div
+      className={`shell${showTasksSubNav ? "" : " no-subnav"}${
+        immersivePomodoro ? " is-pomodoro-fullscreen" : ""
+      }`}
+    >
+      {!immersivePomodoro && (
+        <Sidebar
+          items={NAV_ITEMS}
+          activeView={activeView}
+          onNavigate={handleNavigate}
+          selectedTaskTitle={
+            pomodoroTask?.title ?? selectedTask?.title ?? null
+          }
+          dbPath={dbPath}
+          subNavOpen={subNavOpen}
+          onToggleSubNav={handleToggleSubNav}
+        />
+      )}
+      {showTasksSubNav && !immersivePomodoro && (
         <TasksSubNav
           activePage={tasksSubPage}
           onNavigate={setTasksSubPage}
         />
       )}
-      <main className="main">
+      <main className={`main${immersivePomodoro ? " is-immersive" : ""}`}>
         {loadError && <p className="error-banner">{loadError}</p>}
         {activeView === "tasks" && tasksSubPage === "active" && (
           <TasksView
             tasks={tasks}
             selectedTaskId={selectedTaskId}
-            onSelectTask={setSelectedTaskId}
+            onSelectTask={handleSelectTask}
             onTasksChange={setTasks}
             onStartPomodoro={startPomodoroForTask}
+            categoryFilter={tasksCategoryFilter}
+            onCategoryFilterChange={setTasksCategoryFilter}
           />
         )}
         {activeView === "tasks" && tasksSubPage === "completed" && (
@@ -106,8 +138,13 @@ function App() {
           aria-hidden={activeView !== "pomodoro"}
         >
           <PomodoroView
-            selectedTask={selectedTask}
+            selectedTask={pomodoroTask}
             playToken={pomodoroPlayToken}
+            fullscreen={pomodoroFullscreen}
+            onToggleFullscreen={() =>
+              setPomodoroFullscreen((v) => !v)
+            }
+            onTimingChange={setPomodoroTiming}
             onSessionsChanged={() => {
               void listTasks()
                 .then(setTasks)

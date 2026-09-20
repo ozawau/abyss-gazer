@@ -58,12 +58,16 @@ function StatDuration({ totalMinutes }: { totalMinutes: number }) {
   );
 }
 
+export type CategoryFilter = "all" | "none" | string;
+
 interface TasksViewProps {
   tasks: Task[];
   selectedTaskId: string | null;
   onSelectTask: (id: string | null) => void;
   onTasksChange: (tasks: Task[]) => void;
   onStartPomodoro: (taskId: string) => void;
+  categoryFilter: CategoryFilter;
+  onCategoryFilterChange: (filter: CategoryFilter) => void;
 }
 
 const PRIORITY_GROUPS: { id: TaskPriority; label: string }[] = [
@@ -71,8 +75,6 @@ const PRIORITY_GROUPS: { id: TaskPriority; label: string }[] = [
   { id: "medium", label: "中优先级" },
   { id: "low", label: "低优先级" },
 ];
-
-type CategoryFilter = "all" | "none" | string;
 
 interface DragState {
   taskId: string;
@@ -134,6 +136,8 @@ export function TasksView({
   onSelectTask,
   onTasksChange,
   onStartPomodoro,
+  categoryFilter,
+  onCategoryFilterChange,
 }: TasksViewProps) {
   const [draft, setDraft] = useState("");
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
@@ -147,7 +151,6 @@ export function TasksView({
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [createFor, setCreateFor] = useState<"draft" | "edit" | null>(null);
@@ -457,7 +460,7 @@ export function TasksView({
     );
     if (draftCategoryId === id) setDraftCategoryId(null);
     if (editCategoryId === id) setEditCategoryId(null);
-    if (categoryFilter === id) setCategoryFilter("all");
+    if (categoryFilter === id) onCategoryFilterChange("all");
   }
 
   function openCreateCategory(target: "draft" | "edit") {
@@ -833,14 +836,14 @@ export function TasksView({
         <button
           type="button"
           className={`filter-chip${categoryFilter === "all" ? " is-active" : ""}`}
-          onClick={() => setCategoryFilter("all")}
+          onClick={() => onCategoryFilterChange("all")}
         >
           全部
         </button>
         <button
           type="button"
           className={`filter-chip${categoryFilter === "none" ? " is-active" : ""}`}
-          onClick={() => setCategoryFilter("none")}
+          onClick={() => onCategoryFilterChange("none")}
         >
           未分类
         </button>
@@ -849,7 +852,7 @@ export function TasksView({
             key={c.id}
             type="button"
             className={`filter-chip${categoryFilter === c.id ? " is-active" : ""}`}
-            onClick={() => setCategoryFilter(c.id)}
+            onClick={() => onCategoryFilterChange(c.id)}
             onDoubleClick={() => openEditCategory(c)}
             title="双击编辑分类"
           >

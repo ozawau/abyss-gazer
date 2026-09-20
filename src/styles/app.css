@@ -62,6 +62,10 @@ textarea {
   grid-template-columns: var(--sidebar-width) 1fr;
 }
 
+.shell.is-pomodoro-fullscreen {
+  grid-template-columns: 1fr;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -279,6 +283,20 @@ textarea {
 .main {
   overflow: auto;
   padding: 1.1rem 1.35rem 1.75rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.main.is-immersive {
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.main.is-immersive .view-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
 .view {
@@ -1439,33 +1457,77 @@ body.is-task-dragging * {
 }
 
 .pomodoro-view {
-  max-width: 560px;
+  width: 100%;
+  max-width: min(720px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.75rem, 2vh, 1.25rem);
+  min-height: 0;
+}
+
+.pomodoro-view.is-fullscreen {
+  max-width: none;
+  height: 100%;
+  flex: 1;
+}
+
+.pomodoro-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pomodoro-header-text {
+  min-width: 0;
+}
+
+.pomodoro-header-text h1 {
+  margin: 0 0 0.2rem;
+  font-size: clamp(1.15rem, 2.4vw, 1.5rem);
+}
+
+.pomodoro-header-text p {
+  margin: 0;
+}
+
+.pomodoro-fullscreen-btn {
+  flex-shrink: 0;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.82rem;
 }
 
 .pomodoro-panel {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.75rem;
-}
-
-.pomodoro-task {
+  justify-content: center;
+  gap: clamp(1rem, 3.5vh, 2.25rem);
+  flex: 1;
+  min-height: 0;
   width: 100%;
 }
 
+.pomodoro-view .pomodoro-task {
+  width: min(100%, 28rem);
+  text-align: center;
+}
+
 .pomodoro-task strong {
-  font-size: 1.15rem;
+  font-size: clamp(1rem, 2.2vw, 1.35rem);
 }
 
 .focus-count {
   margin-top: 0.35rem;
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: clamp(0.75rem, 1.5vw, 0.9rem);
 }
 
 .timer-ring {
   --progress: 0;
-  width: min(280px, 70vw);
+  width: min(42vmin, 420px);
+  max-width: 100%;
   aspect-ratio: 1;
   border-radius: 50%;
   display: grid;
@@ -1480,6 +1542,10 @@ body.is-task-dragging * {
   box-shadow: 0 0 0 1px var(--border);
 }
 
+.pomodoro-view.is-fullscreen .timer-ring {
+  width: min(52vmin, 520px);
+}
+
 .timer-ring.phase-focus {
   --ring-color: var(--focus-glow);
 }
@@ -1492,11 +1558,11 @@ body.is-task-dragging * {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.35rem;
+  gap: clamp(0.2rem, 0.8vh, 0.45rem);
 }
 
 .timer-phase {
-  font-size: 0.8rem;
+  font-size: clamp(0.7rem, 1.6vw, 0.9rem);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -1504,14 +1570,14 @@ body.is-task-dragging * {
 
 .timer-digits {
   font-family: var(--mono);
-  font-size: 3.2rem;
+  font-size: clamp(2.4rem, 10vmin, 5.2rem);
   font-weight: 600;
   letter-spacing: 0.04em;
   line-height: 1;
 }
 
 .timer-status {
-  font-size: 0.85rem;
+  font-size: clamp(0.72rem, 1.5vw, 0.88rem);
   color: var(--text-muted);
 }
 
@@ -1519,13 +1585,13 @@ body.is-task-dragging * {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.6rem;
+  gap: clamp(0.4rem, 1.2vw, 0.75rem);
 }
 
-.timer-controls .timer-stop-btn {
-  padding: 0.4rem 0.85rem;
-  border-radius: 6px;
-  font-size: 0.88rem;
+.timer-controls .primary-btn,
+.timer-controls .secondary-btn {
+  padding: clamp(0.35rem, 1vh, 0.55rem) clamp(0.7rem, 1.8vw, 1rem);
+  font-size: clamp(0.82rem, 1.6vw, 0.95rem);
 }
 
 @media (max-width: 720px) {
