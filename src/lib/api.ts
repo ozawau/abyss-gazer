@@ -74,3 +74,7 @@ export function countFocusSessionsSince(
     sinceMs,
   });
 }
+
+export function getDbPath(): Promise<string> {
+  return invoke("get_db_path");
+}

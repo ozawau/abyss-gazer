@@ -5,6 +5,7 @@ interface SidebarProps {
   activeView: ViewId;
   onNavigate: (id: ViewId) => void;
   selectedTaskTitle: string | null;
+  dbPath: string | null;
 }
 
 export function Sidebar({
@@ -12,6 +13,7 @@ export function Sidebar({
   activeView,
   onNavigate,
   selectedTaskTitle,
+  dbPath,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
@@ -48,6 +50,12 @@ export function Sidebar({
             {selectedTaskTitle ?? "未选择"}
           </span>
         </div>
+        {dbPath && (
+          <div className="db-path-chip" title={dbPath}>
+            <span className="chip-label">数据文件</span>
+            <span className="chip-value db-path-value">{dbPath}</span>
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -22,6 +22,12 @@ npm run tauri dev
 npm run tauri build
 ```
 
-数据文件位于 macOS：
+## 数据存储
 
-`~/Library/Application Support/com.abyssgazer.desktop/abyss.db`
+SQLite 与 `.app` 可执行包完全分离，放在用户数据目录（重打包 / 覆盖安装不会丢数据）：
+
+- macOS：`~/Library/Application Support/Abyss Gazer/abyss.db`
+- Windows：`%AppData%/Abyss Gazer/abyss.db`
+- Linux：`~/.local/share/abyss-gazer/abyss.db`
+
+首次启动会自动尝试从旧的 bundle-id 路径迁移数据库。

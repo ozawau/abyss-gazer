@@ -1,7 +1,7 @@
 mod commands;
 mod db;
 
-use db::{init_db, DbState};
+use db::{get_db_path, init_db, DbState};
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -10,9 +10,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let conn = init_db(app.handle())?;
+            let (conn, db_path) = init_db(app.handle())?;
             app.manage(DbState {
                 conn: Mutex::new(conn),
+                db_path,
             });
             Ok(())
         })
@@ -25,6 +26,7 @@ pub fn run() {
             commands::pomodoro::record_pomodoro_session,
             commands::pomodoro::count_today_focus_sessions,
             commands::pomodoro::count_focus_sessions_since,
+            get_db_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

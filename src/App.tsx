@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
-import { listTasks, Task } from "./lib/api";
+import { getDbPath, listTasks, Task } from "./lib/api";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
 import { PomodoroView } from "./views/PomodoroView";
 import { TasksView } from "./views/TasksView";
@@ -11,6 +11,7 @@ function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [dbPath, setDbPath] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,6 +21,13 @@ function App() {
       })
       .catch((err) => {
         if (!cancelled) setLoadError(String(err));
+      });
+    getDbPath()
+      .then((path) => {
+        if (!cancelled) setDbPath(path);
+      })
+      .catch(() => {
+        /* optional */
       });
     return () => {
       cancelled = true;
@@ -38,6 +46,7 @@ function App() {
         activeView={activeView}
         onNavigate={setActiveView}
         selectedTaskTitle={selectedTask?.title ?? null}
+        dbPath={dbPath}
       />
       <main className="main">
         {loadError && <p className="error-banner">{loadError}</p>}
