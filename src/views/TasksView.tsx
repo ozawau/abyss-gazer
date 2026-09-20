@@ -13,6 +13,7 @@ import {
   ClockEstimatePicker,
   TaskPomodoroClocks,
 } from "../components/ClockEstimate";
+import { TaskDetailDialog } from "../components/TaskDetailDialog";
 import {
   Category,
   createCategory,
@@ -121,6 +122,7 @@ export function TasksView({
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [createFor, setCreateFor] = useState<"draft" | "edit" | null>(null);
   const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
+  const [detailTask, setDetailTask] = useState<Task | null>(null);
 
   const dragRef = useRef<DragState | null>(null);
   const tasksRef = useRef(tasks);
@@ -319,6 +321,20 @@ export function TasksView({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function saveTaskDetail(input: {
+    notes: string;
+    due_at: number | null;
+  }) {
+    if (!detailTask) return;
+    const next = await updateTask({
+      id: detailTask.id,
+      notes: input.notes,
+      due_at: input.due_at,
+    });
+    onTasksChange(tasks.map((t) => (t.id === next.id ? next : t)));
+    setDetailTask(next);
   }
 
   async function handleSaveCategory(name: string, color: string) {
@@ -630,6 +646,17 @@ export function TasksView({
                     )}
                     <button
                       type="button"
+                      className="ghost-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDetailTask(task);
+                      }}
+                      disabled={busy}
+                    >
+                      更多
+                    </button>
+                    <button
+                      type="button"
                       className="ghost-btn danger"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -755,6 +782,13 @@ export function TasksView({
             ? () => handleDeleteCategory(editingCategory.id)
             : undefined
         }
+      />
+
+      <TaskDetailDialog
+        open={!!detailTask}
+        task={detailTask}
+        onClose={() => setDetailTask(null)}
+        onSave={saveTaskDetail}
       />
 
       {pendingDeleteTask && (

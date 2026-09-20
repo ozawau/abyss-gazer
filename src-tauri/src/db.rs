@@ -31,6 +31,7 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
             sort_order INTEGER NOT NULL DEFAULT 0,
             category_id TEXT,
             estimate_pomodoros INTEGER NOT NULL DEFAULT 0,
+            due_at INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
@@ -121,6 +122,16 @@ fn migrate_schema(conn: &Connection) -> SqliteResult<()> {
             "ALTER TABLE tasks ADD COLUMN estimate_pomodoros INTEGER NOT NULL DEFAULT 0",
             [],
         )?;
+    }
+
+    let mut stmt = conn.prepare("PRAGMA table_info(tasks)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if !cols.iter().any(|c| c == "due_at") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN due_at INTEGER", [])?;
     }
 
     Ok(())

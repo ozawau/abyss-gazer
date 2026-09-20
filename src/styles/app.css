@@ -770,6 +770,56 @@ input {
   font-size: 0.8rem;
 }
 
+.task-detail-card {
+  width: min(440px, 100%);
+}
+
+.task-detail-title-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.task-detail-meta {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.task-detail-due-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.task-detail-due-row input[type="datetime-local"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-detail-notes {
+  width: 100%;
+  min-height: 7rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  outline: none;
+  resize: vertical;
+  font: inherit;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.task-detail-notes:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
 .field input {
   padding: 0.65rem 0.8rem;
   border-radius: 8px;
