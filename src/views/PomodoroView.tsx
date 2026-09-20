@@ -44,6 +44,7 @@ export function PomodoroView({
   const [remaining, setRemaining] = useState(FOCUS_SECONDS);
   const [todayCount, setTodayCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
 
   const phaseRef = useRef(phase);
   const statusRef = useRef(status);
@@ -179,6 +180,12 @@ export function PomodoroView({
     setPhase("focus");
     plannedRef.current = FOCUS_SECONDS;
     setRemaining(FOCUS_SECONDS);
+    setConfirmStop(false);
+  }
+
+  async function confirmStopTimer() {
+    setConfirmStop(false);
+    await reset();
   }
 
   useEffect(() => {
@@ -275,12 +282,62 @@ export function PomodoroView({
                 暂停
               </button>
             )}
+            {(status === "running" || status === "paused") && (
+              <button
+                type="button"
+                className="danger-btn timer-stop-btn"
+                onClick={() => setConfirmStop(true)}
+              >
+                停止
+              </button>
+            )}
             <button type="button" className="secondary-btn" onClick={skip}>
               跳过
             </button>
             <button type="button" className="secondary-btn" onClick={reset}>
               重置
             </button>
+          </div>
+        </div>
+      )}
+
+      {confirmStop && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setConfirmStop(false)}
+        >
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="stop-timer-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="stop-timer-title">停止计时</h2>
+            <div className="delete-confirm">
+              <p>
+                确定停止当前
+                {phase === "focus" ? "专注" : "休息"}
+                计时？未完成的时段将不会计入完成次数。
+              </p>
+              <div className="delete-confirm-actions">
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => setConfirmStop(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="danger-btn"
+                  onClick={() => void confirmStopTimer()}
+                >
+                  确认停止
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

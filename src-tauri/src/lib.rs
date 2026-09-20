@@ -31,6 +31,7 @@ pub fn run() {
             commands::pomodoro::record_pomodoro_session,
             commands::pomodoro::count_today_focus_sessions,
             commands::pomodoro::count_focus_sessions_since,
+            commands::pomodoro::list_focus_counts_since,
             get_db_path,
         ])
         .run(tauri::generate_context!())

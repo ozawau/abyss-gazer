@@ -127,3 +127,39 @@ pub fn count_focus_sessions_since(
     )
     .map_err(|e| e.to_string())
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FocusCountRow {
+    pub task_id: String,
+    pub count: i64,
+}
+
+#[tauri::command]
+pub fn list_focus_counts_since(
+    db: State<'_, DbState>,
+    since_ms: i64,
+) -> Result<Vec<FocusCountRow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT task_id, COUNT(*) as cnt FROM pomodoro_sessions
+             WHERE kind = 'focus'
+               AND completed = 1
+               AND started_at >= ?1
+             GROUP BY task_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([since_ms], |row| {
+            Ok(FocusCountRow {
+                task_id: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}

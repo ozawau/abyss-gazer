@@ -15,6 +15,7 @@ pub struct Task {
     pub estimate_pomodoros: i64,
     pub completed_pomodoros: i64,
     pub due_at: Option<i64>,
+    pub completed_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -84,14 +85,15 @@ fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         category_id: row.get(6)?,
         estimate_pomodoros: row.get(7)?,
         due_at: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
-        completed_pomodoros: row.get(11)?,
+        completed_at: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+        completed_pomodoros: row.get(12)?,
     })
 }
 
 const TASK_SELECT: &str = "SELECT t.id, t.title, t.notes, t.status, t.priority, t.sort_order,
-       t.category_id, t.estimate_pomodoros, t.due_at, t.created_at, t.updated_at,
+       t.category_id, t.estimate_pomodoros, t.due_at, t.completed_at, t.created_at, t.updated_at,
        (SELECT COUNT(*) FROM pomodoro_sessions p
          WHERE p.task_id = t.id AND p.kind = 'focus' AND p.completed = 1) AS completed_pomodoros
      FROM tasks t";
@@ -177,7 +179,7 @@ pub fn create_task(
         return Err("Title cannot be empty".into());
     }
 
-    let priority = input.priority.unwrap_or_else(|| "medium".into());
+    let priority = input.priority.unwrap_or_else(|| "high".into());
     if !is_valid_priority(&priority) {
         return Err("Invalid priority".into());
     }
@@ -195,8 +197,8 @@ pub fn create_task(
 
     conn.execute(
         "INSERT INTO tasks (id, title, notes, status, priority, sort_order, category_id,
-         estimate_pomodoros, due_at, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         estimate_pomodoros, due_at, completed_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         rusqlite::params![
             id,
             title,
@@ -206,6 +208,7 @@ pub fn create_task(
             sort_order,
             input.category_id,
             estimate_pomodoros,
+            Option::<i64>::None,
             Option::<i64>::None,
             ts,
             ts
@@ -243,6 +246,7 @@ pub fn update_task(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let existing = fetch_task(&conn, &input.id)?;
 
+    let previous_status = existing.status.clone();
     let title = input
         .title
         .map(|t| t.trim().to_string())
@@ -281,11 +285,20 @@ pub fn update_task(
     };
 
     let updated_at = now_ms();
+    let completed_at = if status == "done" {
+        if previous_status == "done" {
+            existing.completed_at.or(Some(updated_at))
+        } else {
+            Some(updated_at)
+        }
+    } else {
+        None
+    };
 
     conn.execute(
         "UPDATE tasks SET title = ?1, notes = ?2, status = ?3, priority = ?4, sort_order = ?5,
-         category_id = ?6, estimate_pomodoros = ?7, due_at = ?8, updated_at = ?9
-         WHERE id = ?10",
+         category_id = ?6, estimate_pomodoros = ?7, due_at = ?8, completed_at = ?9, updated_at = ?10
+         WHERE id = ?11",
         rusqlite::params![
             title,
             notes,
@@ -295,6 +308,7 @@ pub fn update_task(
             category_id,
             estimate_pomodoros,
             due_at,
+            completed_at,
             updated_at,
             input.id
         ],

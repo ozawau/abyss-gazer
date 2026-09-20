@@ -22,6 +22,7 @@ export interface Task {
   estimate_pomodoros: number;
   completed_pomodoros: number;
   due_at: number | null;
+  completed_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -51,7 +52,7 @@ export function createTask(input: {
     input: {
       title: input.title,
       notes: input.notes ?? "",
-      priority: input.priority ?? "medium",
+      priority: input.priority ?? "high",
       category_id: input.category_id ?? null,
       estimate_pomodoros: input.estimate_pomodoros ?? 0,
     },
@@ -149,6 +150,15 @@ export function countFocusSessionsSince(
     taskId,
     sinceMs,
   });
+}
+
+export interface FocusCountRow {
+  task_id: string;
+  count: number;
+}
+
+export function listFocusCountsSince(sinceMs: number): Promise<FocusCountRow[]> {
+  return invoke("list_focus_counts_since", { sinceMs });
 }
 
 export function getDbPath(): Promise<string> {

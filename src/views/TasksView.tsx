@@ -21,12 +21,42 @@ import {
   deleteCategory,
   deleteTask,
   listCategories,
+  listFocusCountsSince,
   reorderTask,
+  startOfLocalDayMs,
   Task,
   TaskPriority,
   updateCategory,
   updateTask,
 } from "../lib/api";
+import {
+  formatGregorianDate,
+  formatLunarDate,
+  formatWeekday,
+  splitDurationMinutes,
+} from "../lib/dateDisplay";
+
+const POMODORO_MINUTES = 25;
+
+function StatDuration({ totalMinutes }: { totalMinutes: number }) {
+  const { hours, minutes } = splitDurationMinutes(totalMinutes);
+  return (
+    <strong className="stat-duration">
+      {hours > 0 && (
+        <>
+          <span className="stat-num">{hours}</span>
+          <span className="stat-unit">小时</span>
+        </>
+      )}
+      {(hours === 0 || minutes > 0) && (
+        <>
+          <span className="stat-num">{minutes}</span>
+          <span className="stat-unit">分</span>
+        </>
+      )}
+    </strong>
+  );
+}
 
 interface TasksViewProps {
   tasks: Task[];
@@ -123,6 +153,9 @@ export function TasksView({
   const [createFor, setCreateFor] = useState<"draft" | "edit" | null>(null);
   const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
+  const [todayFocusByTask, setTodayFocusByTask] = useState<Map<string, number>>(
+    () => new Map(),
+  );
 
   const dragRef = useRef<DragState | null>(null);
   const tasksRef = useRef(tasks);
@@ -142,6 +175,23 @@ export function TasksView({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    listFocusCountsSince(startOfLocalDayMs())
+      .then((rows) => {
+        if (cancelled) return;
+        const map = new Map<string, number>();
+        for (const row of rows) map.set(row.task_id, row.count);
+        setTodayFocusByTask(map);
+      })
+      .catch(() => {
+        if (!cancelled) setTodayFocusByTask(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tasks]);
+
   const categoryMap = useMemo(() => {
     const map = new Map<string, Category>();
     for (const c of categories) map.set(c.id, c);
@@ -156,6 +206,47 @@ export function TasksView({
     return tasks.filter((t) => t.category_id === categoryFilter);
   }, [tasks, categoryFilter]);
 
+  const dayHeader = useMemo(() => {
+    const now = new Date();
+    return {
+      date: formatGregorianDate(now),
+      weekday: formatWeekday(now),
+      lunar: formatLunarDate(now),
+    };
+  }, []);
+
+  const categoryStats = useMemo(() => {
+    let todayFocusSessions = 0;
+    let todayFocusedTasks = 0;
+    let doneCount = 0;
+    let todoCount = 0;
+    let remainingPomodoros = 0;
+
+    for (const task of filteredTasks) {
+      const todayCount = todayFocusByTask.get(task.id) ?? 0;
+      if (todayCount > 0) {
+        todayFocusedTasks += 1;
+        todayFocusSessions += todayCount;
+      }
+      if (task.status === "done") {
+        doneCount += 1;
+      } else {
+        todoCount += 1;
+        const estimate = task.estimate_pomodoros ?? 0;
+        const completed = task.completed_pomodoros ?? 0;
+        remainingPomodoros += Math.max(0, estimate - completed);
+      }
+    }
+
+    return {
+      todayFocusMinutes: todayFocusSessions * POMODORO_MINUTES,
+      todayFocusedTasks,
+      doneCount,
+      remainingMinutes: remainingPomodoros * POMODORO_MINUTES,
+      todoCount,
+    };
+  }, [filteredTasks, todayFocusByTask]);
+
   const grouped = useMemo(() => {
     const map: Record<TaskPriority, Task[]> = {
       high: [],
@@ -163,6 +254,7 @@ export function TasksView({
       low: [],
     };
     for (const task of filteredTasks) {
+      if (task.status === "done") continue;
       const key = normalizePriority(task.priority) ?? "medium";
       map[key].push(task);
     }
@@ -679,11 +771,36 @@ export function TasksView({
 
   return (
     <div className="view tasks-view">
-      <header className="view-header">
-        <h1>任务</h1>
-        <p>
-          创建时可选择分类；按住 ⋮⋮ 可调整优先级与排序。
-        </p>
+      <header className="view-header tasks-day-header">
+        <div className="tasks-day-title">
+          <h1>{dayHeader.date}</h1>
+          <p className="tasks-day-meta">
+            {dayHeader.weekday}
+            {dayHeader.lunar ? ` · ${dayHeader.lunar}` : ""}
+          </p>
+        </div>
+        <ul className="tasks-day-stats" aria-label="今日统计">
+          <li>
+            <span className="stat-label">今日专注</span>
+            <StatDuration totalMinutes={categoryStats.todayFocusMinutes} />
+          </li>
+          <li>
+            <span className="stat-label">专注任务</span>
+            <strong>{categoryStats.todayFocusedTasks}</strong>
+          </li>
+          <li>
+            <span className="stat-label">已完成</span>
+            <strong>{categoryStats.doneCount}</strong>
+          </li>
+          <li>
+            <span className="stat-label">剩余预估</span>
+            <StatDuration totalMinutes={categoryStats.remainingMinutes} />
+          </li>
+          <li>
+            <span className="stat-label">未完成</span>
+            <strong>{categoryStats.todoCount}</strong>
+          </li>
+        </ul>
       </header>
 
       <form className="task-create" onSubmit={handleCreate}>

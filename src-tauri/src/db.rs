@@ -32,6 +32,7 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
             category_id TEXT,
             estimate_pomodoros INTEGER NOT NULL DEFAULT 0,
             due_at INTEGER,
+            completed_at INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
@@ -132,6 +133,20 @@ fn migrate_schema(conn: &Connection) -> SqliteResult<()> {
 
     if !cols.iter().any(|c| c == "due_at") {
         conn.execute("ALTER TABLE tasks ADD COLUMN due_at INTEGER", [])?;
+    }
+
+    let mut stmt = conn.prepare("PRAGMA table_info(tasks)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if !cols.iter().any(|c| c == "completed_at") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN completed_at INTEGER", [])?;
+        conn.execute(
+            "UPDATE tasks SET completed_at = updated_at WHERE status = 'done' AND completed_at IS NULL",
+            [],
+        )?;
     }
 
     Ok(())

@@ -6,6 +6,9 @@ interface SidebarProps {
   onNavigate: (id: ViewId) => void;
   selectedTaskTitle: string | null;
   dbPath: string | null;
+  /** Which views currently have their sub-nav open. */
+  subNavOpen: Partial<Record<ViewId, boolean>>;
+  onToggleSubNav: (id: ViewId) => void;
 }
 
 export function Sidebar({
@@ -14,6 +17,8 @@ export function Sidebar({
   onNavigate,
   selectedTaskTitle,
   dbPath,
+  subNavOpen,
+  onToggleSubNav,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
@@ -26,21 +31,43 @@ export function Sidebar({
       </div>
 
       <nav className="nav" aria-label="主导航">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`nav-item${activeView === item.id ? " is-active" : ""}${
-              !item.enabled ? " is-disabled" : ""
-            }`}
-            disabled={!item.enabled}
-            onClick={() => item.enabled && onNavigate(item.id)}
-            title={item.enabled ? item.label : `${item.label}（即将推出）`}
-          >
-            <span className="nav-label">{item.label}</span>
-            {!item.enabled && <span className="nav-soon">Soon</span>}
-          </button>
-        ))}
+        {items.map((item) => {
+          const open = !!subNavOpen[item.id];
+          return (
+            <div
+              key={item.id}
+              className={`nav-row${activeView === item.id ? " is-active" : ""}${
+                !item.enabled ? " is-disabled" : ""
+              }`}
+            >
+              <button
+                type="button"
+                className="nav-item"
+                disabled={!item.enabled}
+                onClick={() => item.enabled && onNavigate(item.id)}
+                title={item.enabled ? item.label : `${item.label}（即将推出）`}
+              >
+                <span className="nav-label">{item.label}</span>
+                {!item.enabled && <span className="nav-soon">Soon</span>}
+              </button>
+              {item.hasSubNav && item.enabled && (
+                <button
+                  type="button"
+                  className={`nav-subnav-toggle${open ? " is-open" : ""}`}
+                  aria-label={open ? `收起${item.label}子菜单` : `展开${item.label}子菜单`}
+                  aria-expanded={open}
+                  title={open ? "收起子菜单" : "展开子菜单"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleSubNav(item.id);
+                  }}
+                >
+                  {open ? "‹" : "›"}
+                </button>
+              )}
+            </div>
+          );
+        })}
       </nav>
 
       <div className="sidebar-footer">
