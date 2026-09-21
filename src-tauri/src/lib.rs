@@ -35,6 +35,7 @@ pub fn run() {
             commands::pomodoro::count_focus_sessions_since,
             commands::pomodoro::count_focus_sessions_total_since,
             commands::pomodoro::list_focus_counts_since,
+            commands::pomodoro::list_pomodoro_sessions_in_range,
             commands::settings::get_pomodoro_settings,
             commands::settings::set_pomodoro_settings,
             commands::sync::get_system_settings,
@@ -43,6 +44,8 @@ pub fn run() {
             commands::sync::get_active_data_dir,
             commands::sync::set_data_directory,
             commands::sync::run_data_sync,
+            commands::holidays::read_cn_holidays_cache,
+            commands::holidays::write_cn_holidays_cache,
             get_db_path,
         ])
         .run(tauri::generate_context!())

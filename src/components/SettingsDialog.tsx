@@ -15,10 +15,21 @@ import {
   SyncIntervalMinutes,
   SyncMethod,
   SystemSettings,
+  WeekStartsOn,
 } from "../lib/api";
 import { ToggleSwitch } from "./ToggleSwitch";
 
-type SettingsSection = "pomodoro" | "system";
+type SettingsSection = "pomodoro" | "calendar" | "system";
+
+const WEEK_START_OPTIONS: { value: WeekStartsOn; label: string }[] = [
+  { value: 1, label: "周一" },
+  { value: 2, label: "周二" },
+  { value: 3, label: "周三" },
+  { value: 4, label: "周四" },
+  { value: 5, label: "周五" },
+  { value: 6, label: "周六" },
+  { value: 0, label: "周日" },
+];
 
 interface SettingsDialogProps {
   open: boolean;
@@ -214,6 +225,15 @@ export function SettingsDialog({
             <button
               type="button"
               className={`settings-nav-item${
+                section === "calendar" ? " is-active" : ""
+              }`}
+              onClick={() => setSection("calendar")}
+            >
+              日历
+            </button>
+            <button
+              type="button"
+              className={`settings-nav-item${
                 section === "system" ? " is-active" : ""
               }`}
               onClick={() => setSection("system")}
@@ -397,6 +417,35 @@ export function SettingsDialog({
                     }
                   />
                 </div>
+              </div>
+            )}
+
+            {section === "calendar" && (
+              <div className="settings-panel">
+                <header className="settings-panel-header">
+                  <h3>日历</h3>
+                  <p>调整年、月、周视图的展示方式。</p>
+                </header>
+
+                <label className="settings-row">
+                  <span className="settings-row-label">一周开始于</span>
+                  <select
+                    className="settings-select"
+                    value={system.weekStartsOn}
+                    disabled={busy}
+                    onChange={(e) =>
+                      patchSystem({
+                        weekStartsOn: Number(e.target.value) as WeekStartsOn,
+                      })
+                    }
+                  >
+                    {WEEK_START_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
             )}
 

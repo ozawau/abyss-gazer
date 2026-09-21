@@ -164,6 +164,16 @@ export function listFocusCountsSince(sinceMs: number): Promise<FocusCountRow[]> 
   return invoke("list_focus_counts_since", { sinceMs });
 }
 
+export function listPomodoroSessionsInRange(
+  startMs: number,
+  endMs: number,
+): Promise<PomodoroSession[]> {
+  return invoke("list_pomodoro_sessions_in_range", {
+    startMs,
+    endMs,
+  });
+}
+
 export function countFocusSessionsTotalSince(sinceMs: number): Promise<number> {
   return invoke("count_focus_sessions_total_since", { sinceMs });
 }
@@ -207,6 +217,9 @@ export function getDbPath(): Promise<string> {
 export type SyncMethod = "local" | "git";
 export type SyncIntervalMinutes = 5 | 10 | 30;
 
+/** 0=周日 … 6=周六，与 `Date.getDay()` 一致 */
+export type WeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
 export interface SystemSettings {
   dataDir: string | null;
   syncEnabled: boolean;
@@ -214,6 +227,7 @@ export interface SystemSettings {
   syncIntervalMinutes: SyncIntervalMinutes;
   localBackupDir: string | null;
   gitCommitMessage: string;
+  weekStartsOn: WeekStartsOn;
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -223,6 +237,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   syncIntervalMinutes: 10,
   localBackupDir: null,
   gitCommitMessage: "chore: sync Abyss Gazer data",
+  weekStartsOn: 1,
 };
 
 export function getSystemSettings(): Promise<SystemSettings> {

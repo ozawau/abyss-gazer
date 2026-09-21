@@ -28,6 +28,13 @@ pub struct SystemSettings {
     pub sync_interval_minutes: i64,
     pub local_backup_dir: Option<String>,
     pub git_commit_message: String,
+    /// Calendar week start: 0=Sunday … 6=Saturday (same as JS `Date.getDay()`).
+    #[serde(default = "default_week_starts_on")]
+    pub week_starts_on: u8,
+}
+
+fn default_week_starts_on() -> u8 {
+    1
 }
 
 impl Default for SystemSettings {
@@ -39,7 +46,16 @@ impl Default for SystemSettings {
             sync_interval_minutes: 10,
             local_backup_dir: None,
             git_commit_message: "chore: sync Abyss Gazer data".into(),
+            week_starts_on: default_week_starts_on(),
         }
+    }
+}
+
+fn normalize_week_starts_on(value: u8) -> u8 {
+    if value <= 6 {
+        value
+    } else {
+        default_week_starts_on()
     }
 }
 
@@ -74,6 +90,7 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
         sync_interval_minutes: normalize_interval(settings.sync_interval_minutes),
         local_backup_dir,
         git_commit_message,
+        week_starts_on: normalize_week_starts_on(settings.week_starts_on),
     }
 }
 

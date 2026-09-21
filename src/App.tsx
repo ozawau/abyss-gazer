@@ -14,9 +14,12 @@ import {
   SystemSettings,
   Task,
 } from "./lib/api";
+import { initCnHolidayData } from "./lib/cnHolidayData";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
 import type { TasksSubPage } from "./lib/tasksNav";
 import { CompletedTasksView } from "./views/CompletedTasksView";
+import { CalendarView } from "./views/CalendarView";
+import { GanttView } from "./views/GanttView";
 import { PomodoroView } from "./views/PomodoroView";
 import { CategoryFilter, TasksView } from "./views/TasksView";
 import { UpcomingTasksView } from "./views/UpcomingTasksView";
@@ -46,6 +49,10 @@ function App() {
     DEFAULT_SYSTEM_SETTINGS,
   );
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  useEffect(() => {
+    initCnHolidayData();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -219,6 +226,24 @@ function App() {
         )}
         {activeView === "tasks" && tasksSubPage === "completed" && (
           <CompletedTasksView tasks={tasks} onTasksChange={setTasks} />
+        )}
+        {activeView === "gantt" && (
+          <GanttView
+            tasks={tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={handleSelectTask}
+            onStartPomodoro={startPomodoroForTask}
+            weekStartsOn={systemSettings.weekStartsOn}
+          />
+        )}
+        {activeView === "calendar" && (
+          <CalendarView
+            tasks={tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={handleSelectTask}
+            onStartPomodoro={startPomodoroForTask}
+            weekStartsOn={systemSettings.weekStartsOn}
+          />
         )}
         <div
           className={
