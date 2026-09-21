@@ -9,6 +9,7 @@ interface SidebarProps {
   /** Which views currently have their sub-nav open. */
   subNavOpen: Partial<Record<ViewId, boolean>>;
   onToggleSubNav: (id: ViewId) => void;
+  onOpenSettings: () => void;
 }
 
 export function Sidebar({
@@ -19,6 +20,7 @@ export function Sidebar({
   dbPath,
   subNavOpen,
   onToggleSubNav,
+  onOpenSettings,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
@@ -83,6 +85,13 @@ export function Sidebar({
             <span className="chip-value db-path-value">{dbPath}</span>
           </div>
         )}
+        <button
+          type="button"
+          className="sidebar-settings-btn"
+          onClick={onOpenSettings}
+        >
+          设置
+        </button>
       </div>
     </aside>
   );

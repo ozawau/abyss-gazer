@@ -22,6 +22,7 @@ export interface Task {
   estimate_pomodoros: number;
   completed_pomodoros: number;
   due_at: number | null;
+  start_at: number | null;
   completed_at: number | null;
   created_at: number;
   updated_at: number;
@@ -68,6 +69,7 @@ export function updateTask(input: {
   category_id?: string | null;
   estimate_pomodoros?: number;
   due_at?: number | null;
+  start_at?: number | null;
 }): Promise<Task> {
   const payload: Record<string, unknown> = { id: input.id };
   if (input.title !== undefined) payload.title = input.title;
@@ -79,6 +81,7 @@ export function updateTask(input: {
     payload.estimate_pomodoros = input.estimate_pomodoros;
   }
   if (input.due_at !== undefined) payload.due_at = input.due_at;
+  if (input.start_at !== undefined) payload.start_at = input.start_at;
   return invoke("update_task", { input: payload });
 }
 
@@ -161,6 +164,89 @@ export function listFocusCountsSince(sinceMs: number): Promise<FocusCountRow[]> 
   return invoke("list_focus_counts_since", { sinceMs });
 }
 
+export function countFocusSessionsTotalSince(sinceMs: number): Promise<number> {
+  return invoke("count_focus_sessions_total_since", { sinceMs });
+}
+
+export interface PomodoroSettings {
+  focusMinutes: number;
+  breaksEnabled: boolean;
+  shortBreakMinutes: number;
+  longBreakEnabled: boolean;
+  longBreakMinutes: number;
+  longBreakInterval: number;
+  autoStartFocus: boolean;
+  autoStartBreak: boolean;
+}
+
+export const DEFAULT_POMODORO_SETTINGS: PomodoroSettings = {
+  focusMinutes: 25,
+  breaksEnabled: true,
+  shortBreakMinutes: 5,
+  longBreakEnabled: true,
+  longBreakMinutes: 15,
+  longBreakInterval: 4,
+  autoStartFocus: false,
+  autoStartBreak: false,
+};
+
+export function getPomodoroSettings(): Promise<PomodoroSettings> {
+  return invoke("get_pomodoro_settings");
+}
+
+export function setPomodoroSettings(
+  settings: PomodoroSettings,
+): Promise<PomodoroSettings> {
+  return invoke("set_pomodoro_settings", { settings });
+}
+
 export function getDbPath(): Promise<string> {
   return invoke("get_db_path");
+}
+
+export type SyncMethod = "local" | "git";
+export type SyncIntervalMinutes = 5 | 10 | 30;
+
+export interface SystemSettings {
+  dataDir: string | null;
+  syncEnabled: boolean;
+  syncMethod: SyncMethod;
+  syncIntervalMinutes: SyncIntervalMinutes;
+  localBackupDir: string | null;
+  gitCommitMessage: string;
+}
+
+export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  dataDir: null,
+  syncEnabled: false,
+  syncMethod: "local",
+  syncIntervalMinutes: 10,
+  localBackupDir: null,
+  gitCommitMessage: "chore: sync Abyss Gazer data",
+};
+
+export function getSystemSettings(): Promise<SystemSettings> {
+  return invoke("get_system_settings");
+}
+
+export function setSystemSettings(
+  settings: SystemSettings,
+): Promise<SystemSettings> {
+  return invoke("set_system_settings", { settings });
+}
+
+export function getDefaultDataDir(): Promise<string> {
+  return invoke("get_default_data_dir");
+}
+
+export function getActiveDataDir(): Promise<string> {
+  return invoke("get_active_data_dir");
+}
+
+export function setDataDirectory(path: string): Promise<SystemSettings> {
+  return invoke("set_data_directory", { path });
+}
+
+export function runDataSync(): Promise<void> {
+  return invoke("run_data_sync");
 }

@@ -15,6 +15,7 @@ pub struct Task {
     pub estimate_pomodoros: i64,
     pub completed_pomodoros: i64,
     pub due_at: Option<i64>,
+    pub start_at: Option<i64>,
     pub completed_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -43,6 +44,9 @@ pub struct UpdateTaskInput {
     /// Missing = leave unchanged; `null` = clear; number = set.
     #[serde(default)]
     pub due_at: Option<Option<i64>>,
+    /// Missing = leave unchanged; `null` = clear; number = set.
+    #[serde(default)]
+    pub start_at: Option<Option<i64>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,15 +89,16 @@ fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         category_id: row.get(6)?,
         estimate_pomodoros: row.get(7)?,
         due_at: row.get(8)?,
-        completed_at: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
-        completed_pomodoros: row.get(12)?,
+        start_at: row.get(9)?,
+        completed_at: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+        completed_pomodoros: row.get(13)?,
     })
 }
 
 const TASK_SELECT: &str = "SELECT t.id, t.title, t.notes, t.status, t.priority, t.sort_order,
-       t.category_id, t.estimate_pomodoros, t.due_at, t.completed_at, t.created_at, t.updated_at,
+       t.category_id, t.estimate_pomodoros, t.due_at, t.start_at, t.completed_at, t.created_at, t.updated_at,
        (SELECT COUNT(*) FROM pomodoro_sessions p
          WHERE p.task_id = t.id AND p.kind = 'focus' AND p.completed = 1) AS completed_pomodoros
      FROM tasks t";
@@ -197,8 +202,8 @@ pub fn create_task(
 
     conn.execute(
         "INSERT INTO tasks (id, title, notes, status, priority, sort_order, category_id,
-         estimate_pomodoros, due_at, completed_at, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+         estimate_pomodoros, due_at, start_at, completed_at, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         rusqlite::params![
             id,
             title,
@@ -208,6 +213,7 @@ pub fn create_task(
             sort_order,
             input.category_id,
             estimate_pomodoros,
+            Option::<i64>::None,
             Option::<i64>::None,
             Option::<i64>::None,
             ts,
@@ -284,6 +290,12 @@ pub fn update_task(
         Some(Some(ts)) => Some(ts),
     };
 
+    let start_at = match input.start_at {
+        None => existing.start_at,
+        Some(None) => None,
+        Some(Some(ts)) => Some(ts),
+    };
+
     let updated_at = now_ms();
     let completed_at = if status == "done" {
         if previous_status == "done" {
@@ -297,8 +309,9 @@ pub fn update_task(
 
     conn.execute(
         "UPDATE tasks SET title = ?1, notes = ?2, status = ?3, priority = ?4, sort_order = ?5,
-         category_id = ?6, estimate_pomodoros = ?7, due_at = ?8, completed_at = ?9, updated_at = ?10
-         WHERE id = ?11",
+         category_id = ?6, estimate_pomodoros = ?7, due_at = ?8, start_at = ?9, completed_at = ?10,
+         updated_at = ?11
+         WHERE id = ?12",
         rusqlite::params![
             title,
             notes,
@@ -308,6 +321,7 @@ pub fn update_task(
             category_id,
             estimate_pomodoros,
             due_at,
+            start_at,
             completed_at,
             updated_at,
             input.id

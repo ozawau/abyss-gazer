@@ -8,6 +8,7 @@ interface TaskDetailDialogProps {
   onSave: (input: {
     notes: string;
     due_at: number | null;
+    start_at: number | null;
   }) => Promise<void>;
 }
 
@@ -44,6 +45,7 @@ export function TaskDetailDialog({
   onSave,
 }: TaskDetailDialogProps) {
   const [notes, setNotes] = useState("");
+  const [startLocal, setStartLocal] = useState("");
   const [dueLocal, setDueLocal] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +53,7 @@ export function TaskDetailDialog({
   useEffect(() => {
     if (!open || !task) return;
     setNotes(task.notes ?? "");
+    setStartLocal(toDatetimeLocalValue(task.start_at));
     setDueLocal(toDatetimeLocalValue(task.due_at));
     setBusy(false);
     setError(null);
@@ -66,6 +69,7 @@ export function TaskDetailDialog({
     try {
       await onSave({
         notes,
+        start_at: fromDatetimeLocalValue(startLocal),
         due_at: fromDatetimeLocalValue(dueLocal),
       });
       onClose();
@@ -107,6 +111,28 @@ export function TaskDetailDialog({
             <span>创建时间</span>
             <p className="task-detail-meta">{formatDateTime(task.created_at)}</p>
           </div>
+
+          <label className="field">
+            <span>开始时间</span>
+            <div className="task-detail-due-row">
+              <input
+                type="datetime-local"
+                value={startLocal}
+                onChange={(e) => setStartLocal(e.target.value)}
+                disabled={busy}
+              />
+              {startLocal && (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  disabled={busy}
+                  onClick={() => setStartLocal("")}
+                >
+                  清除
+                </button>
+              )}
+            </div>
+          </label>
 
           <label className="field">
             <span>到期时间</span>

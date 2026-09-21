@@ -3,9 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
+use crate::system_config::{db_file_in, read_system_settings, resolve_active_data_dir};
+
 pub struct DbState {
     pub conn: Mutex<Connection>,
-    pub db_path: PathBuf,
+    pub db_path: Mutex<PathBuf>,
 }
 
 pub fn open_db(path: &Path) -> SqliteResult<Connection> {
@@ -32,6 +34,7 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
             category_id TEXT,
             estimate_pomodoros INTEGER NOT NULL DEFAULT 0,
             due_at INTEGER,
+            start_at INTEGER,
             completed_at INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
@@ -53,6 +56,11 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
             ON pomodoro_sessions(task_id);
         CREATE INDEX IF NOT EXISTS idx_pomodoro_started_at
             ON pomodoro_sessions(started_at);
+
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY NOT NULL,
+            value TEXT NOT NULL
+        );
         ",
     )?;
     migrate_schema(&conn)?;
@@ -141,6 +149,16 @@ fn migrate_schema(conn: &Connection) -> SqliteResult<()> {
         .filter_map(|r| r.ok())
         .collect();
 
+    if !cols.iter().any(|c| c == "start_at") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN start_at INTEGER", [])?;
+    }
+
+    let mut stmt = conn.prepare("PRAGMA table_info(tasks)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+
     if !cols.iter().any(|c| c == "completed_at") {
         conn.execute("ALTER TABLE tasks ADD COLUMN completed_at INTEGER", [])?;
         conn.execute(
@@ -149,29 +167,18 @@ fn migrate_schema(conn: &Connection) -> SqliteResult<()> {
         )?;
     }
 
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY NOT NULL,
+            value TEXT NOT NULL
+        );",
+    )?;
+
     Ok(())
 }
 
-/// Stable data root, independent of the .app bundle location and rebuilds.
+/// Stable default data root, independent of the .app bundle location and rebuilds.
 /// Uses the product name (not bundle id) so identifier changes won't orphan data.
-pub fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|e| format!("resolve home dir: {e}"))?;
-
-    #[cfg(target_os = "macos")]
-    let dir = home.join("Library/Application Support/Abyss Gazer");
-
-    #[cfg(target_os = "windows")]
-    let dir = home.join("AppData/Roaming/Abyss Gazer");
-
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let dir = home.join(".local/share/abyss-gazer");
-
-    Ok(dir)
-}
-
 fn legacy_db_candidates(app: &AppHandle) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(home) = app.path().home_dir() {
@@ -230,9 +237,10 @@ fn migrate_legacy_db(app: &AppHandle, dest: &Path) {
 }
 
 pub fn init_db(app: &AppHandle) -> Result<(Connection, PathBuf), String> {
-    let dir = resolve_data_dir(app)?;
+    let _ = read_system_settings(app)?;
+    let dir = resolve_active_data_dir(app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("create data dir: {e}"))?;
-    let db_path = dir.join("abyss.db");
+    let db_path = db_file_in(&dir);
     migrate_legacy_db(app, &db_path);
     eprintln!("[abyss-gazer] database: {}", db_path.display());
     let conn = open_db(&db_path).map_err(|e| format!("open database: {e}"))?;
@@ -240,8 +248,9 @@ pub fn init_db(app: &AppHandle) -> Result<(Connection, PathBuf), String> {
 }
 
 #[tauri::command]
-pub fn get_db_path(db: tauri::State<'_, DbState>) -> String {
-    db.db_path.display().to_string()
+pub fn get_db_path(db: tauri::State<'_, DbState>) -> Result<String, String> {
+    let path = db.db_path.lock().map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
 }
 
 #[cfg(test)]

@@ -128,6 +128,23 @@ pub fn count_focus_sessions_since(
     .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn count_focus_sessions_total_since(
+    db: State<'_, DbState>,
+    since_ms: i64,
+) -> Result<i64, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT COUNT(*) FROM pomodoro_sessions
+         WHERE kind = 'focus'
+           AND completed = 1
+           AND started_at >= ?1",
+        [since_ms],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FocusCountRow {
     pub task_id: String,

@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TasksSubNav } from "./components/TasksSubNav";
-import { getDbPath, listTasks, Task } from "./lib/api";
+import {
+  DEFAULT_POMODORO_SETTINGS,
+  DEFAULT_SYSTEM_SETTINGS,
+  getDbPath,
+  getPomodoroSettings,
+  getSystemSettings,
+  listTasks,
+  PomodoroSettings,
+  runDataSync,
+  SystemSettings,
+  Task,
+} from "./lib/api";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
 import type { TasksSubPage } from "./lib/tasksNav";
 import { CompletedTasksView } from "./views/CompletedTasksView";
 import { PomodoroView } from "./views/PomodoroView";
 import { CategoryFilter, TasksView } from "./views/TasksView";
+import { UpcomingTasksView } from "./views/UpcomingTasksView";
 import "./styles/app.css";
 
 function App() {
@@ -25,6 +38,14 @@ function App() {
   const [pomodoroFullscreen, setPomodoroFullscreen] = useState(false);
   const [tasksCategoryFilter, setTasksCategoryFilter] =
     useState<CategoryFilter>("all");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings>(
+    DEFAULT_POMODORO_SETTINGS,
+  );
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>(
+    DEFAULT_SYSTEM_SETTINGS,
+  );
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,10 +63,60 @@ function App() {
       .catch(() => {
         /* optional */
       });
+    getPomodoroSettings()
+      .then((settings) => {
+        if (!cancelled) setPomodoroSettings(settings);
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+    getSystemSettings()
+      .then((settings) => {
+        if (!cancelled) setSystemSettings(settings);
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!systemSettings.syncEnabled) return;
+
+    let cancelled = false;
+    let inFlight = false;
+
+    async function tick() {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        await runDataSync();
+      } catch (err) {
+        if (cancelled) return;
+        setSystemSettings((prev) => ({ ...prev, syncEnabled: false }));
+        setSyncError(String(err));
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    void tick();
+    const ms = systemSettings.syncIntervalMinutes * 60_000;
+    const id = window.setInterval(() => void tick(), ms);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [
+    systemSettings.syncEnabled,
+    systemSettings.syncMethod,
+    systemSettings.syncIntervalMinutes,
+    systemSettings.localBackupDir,
+    systemSettings.gitCommitMessage,
+    systemSettings.dataDir,
+  ]);
 
   const selectedTask = useMemo(
     () => tasks.find((t) => t.id === selectedTaskId) ?? null,
@@ -87,6 +158,20 @@ function App() {
     }
   }
 
+  function handleSystemSettingsChange(next: SystemSettings) {
+    setSystemSettings(next);
+  }
+
+  async function handleDataPathChange(nextDbPath: string) {
+    setDbPath(nextDbPath);
+    try {
+      const rows = await listTasks();
+      setTasks(rows);
+    } catch (err) {
+      setLoadError(String(err));
+    }
+  }
+
   const immersivePomodoro =
     activeView === "pomodoro" && pomodoroFullscreen;
 
@@ -107,6 +192,7 @@ function App() {
           dbPath={dbPath}
           subNavOpen={subNavOpen}
           onToggleSubNav={handleToggleSubNav}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
       )}
       {showTasksSubNav && !immersivePomodoro && (
@@ -128,6 +214,9 @@ function App() {
             onCategoryFilterChange={setTasksCategoryFilter}
           />
         )}
+        {activeView === "tasks" && tasksSubPage === "upcoming" && (
+          <UpcomingTasksView tasks={tasks} onTasksChange={setTasks} />
+        )}
         {activeView === "tasks" && tasksSubPage === "completed" && (
           <CompletedTasksView tasks={tasks} onTasksChange={setTasks} />
         )}
@@ -139,6 +228,7 @@ function App() {
         >
           <PomodoroView
             selectedTask={pomodoroTask}
+            settings={pomodoroSettings}
             playToken={pomodoroPlayToken}
             fullscreen={pomodoroFullscreen}
             onToggleFullscreen={() =>
@@ -153,6 +243,44 @@ function App() {
           />
         </div>
       </main>
+
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onPomodoroSettingsChange={setPomodoroSettings}
+        onSystemSettingsChange={handleSystemSettingsChange}
+        onDataPathChange={(path) => void handleDataPathChange(path)}
+      />
+
+      {syncError && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setSyncError(null)}
+        >
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sync-error-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="sync-error-title">同步已停止</h2>
+            <div className="delete-confirm">
+              <p>{syncError}</p>
+              <div className="delete-confirm-actions">
+                <button
+                  type="button"
+                  className="primary-btn"
+                  onClick={() => setSyncError(null)}
+                >
+                  知道了
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

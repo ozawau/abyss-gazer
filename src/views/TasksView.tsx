@@ -35,6 +35,7 @@ import {
   formatWeekday,
   splitDurationMinutes,
 } from "../lib/dateDisplay";
+import { isTaskStarted } from "../lib/taskSchedule";
 
 const POMODORO_MINUTES = 25;
 
@@ -159,10 +160,16 @@ export function TasksView({
   const [todayFocusByTask, setTodayFocusByTask] = useState<Map<string, number>>(
     () => new Map(),
   );
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const dragRef = useRef<DragState | null>(null);
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,12 +209,16 @@ export function TasksView({
   }, [categories]);
 
   const filteredTasks = useMemo(() => {
-    if (categoryFilter === "all") return tasks;
-    if (categoryFilter === "none") {
-      return tasks.filter((t) => !t.category_id);
-    }
-    return tasks.filter((t) => t.category_id === categoryFilter);
-  }, [tasks, categoryFilter]);
+    const byCategory =
+      categoryFilter === "all"
+        ? tasks
+        : categoryFilter === "none"
+          ? tasks.filter((t) => !t.category_id)
+          : tasks.filter((t) => t.category_id === categoryFilter);
+    return byCategory.filter(
+      (t) => t.status === "done" || isTaskStarted(t, nowMs),
+    );
+  }, [tasks, categoryFilter, nowMs]);
 
   const dayHeader = useMemo(() => {
     const now = new Date();
@@ -242,6 +253,7 @@ export function TasksView({
     }
 
     return {
+      todayFocusSessions,
       todayFocusMinutes: todayFocusSessions * POMODORO_MINUTES,
       todayFocusedTasks,
       doneCount,
@@ -421,12 +433,14 @@ export function TasksView({
   async function saveTaskDetail(input: {
     notes: string;
     due_at: number | null;
+    start_at: number | null;
   }) {
     if (!detailTask) return;
     const next = await updateTask({
       id: detailTask.id,
       notes: input.notes,
       due_at: input.due_at,
+      start_at: input.start_at,
     });
     onTasksChange(tasks.map((t) => (t.id === next.id ? next : t)));
     setDetailTask(next);
@@ -786,6 +800,10 @@ export function TasksView({
           <li>
             <span className="stat-label">今日专注</span>
             <StatDuration totalMinutes={categoryStats.todayFocusMinutes} />
+          </li>
+          <li>
+            <span className="stat-label">今日番茄</span>
+            <strong>{categoryStats.todayFocusSessions}</strong>
           </li>
           <li>
             <span className="stat-label">专注任务</span>
