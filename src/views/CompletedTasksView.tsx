@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { TaskDetailDialog } from "../components/TaskDetailDialog";
+import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
+import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
+import { TaskRowMenu } from "../components/TaskRowMenu";
 import {
   Category,
+  createTask,
   deleteTask,
   listCategories,
   Task,
   updateTask,
 } from "../lib/api";
+import { applyAncestorFields, removeTaskTree } from "../lib/taskTree";
 
 const PAGE_SIZE = 15;
 
@@ -56,6 +60,12 @@ export function CompletedTasksView({
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Task | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
+  const [rowMenu, setRowMenu] = useState<{
+    task: Task;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [subtaskParent, setSubtaskParent] = useState<Task | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,7 +166,7 @@ export function CompletedTasksView({
     setError(null);
     try {
       await deleteTask(task.id);
-      onTasksChange(tasks.filter((t) => t.id !== task.id));
+      onTasksChange(removeTaskTree(tasks, task.id));
       setPendingDelete(null);
     } catch (err) {
       setError(String(err));
@@ -165,17 +175,18 @@ export function CompletedTasksView({
     }
   }
 
-  async function saveTaskDetail(input: {
-    notes: string;
-    due_at: number | null;
-  }) {
+  async function saveTaskDetail(input: TaskDetailSave) {
     if (!detailTask) return;
     const next = await updateTask({
       id: detailTask.id,
+      title: input.title,
+      ...(detailTask.parent_id ? {} : { category_id: input.category_id }),
+      estimate_pomodoros: input.estimate_pomodoros,
       notes: input.notes,
       due_at: input.due_at,
+      start_at: input.start_at,
     });
-    onTasksChange(tasks.map((t) => (t.id === next.id ? next : t)));
+    onTasksChange(applyAncestorFields(tasks, next));
     setDetailTask(next);
   }
 
@@ -287,7 +298,14 @@ export function CompletedTasksView({
               ? categoryMap.get(task.category_id)
               : null;
             return (
-              <li key={task.id} className="completed-row">
+              <li
+                key={task.id}
+                className="completed-row"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setRowMenu({ task, x: e.clientX, y: e.clientY });
+                }}
+              >
                 <div className="completed-row-main">
                   <strong className="completed-title">{task.title}</strong>
                   <div className="completed-row-meta">
@@ -316,7 +334,7 @@ export function CompletedTasksView({
                     disabled={busy}
                     onClick={() => setDetailTask(task)}
                   >
-                    更多
+                    编辑
                   </button>
                   <button
                     type="button"
@@ -406,9 +424,51 @@ export function CompletedTasksView({
       <TaskDetailDialog
         open={!!detailTask}
         task={detailTask}
+        categories={categories}
         onClose={() => setDetailTask(null)}
         onSave={saveTaskDetail}
+        onCreateSubtask={async (title) => {
+          if (!detailTask) return;
+          const created = await createTask({
+            title,
+            parent_id: detailTask.id,
+          });
+          onTasksChange([created, ...tasks]);
+        }}
       />
+
+      <CreateSubtaskDialog
+        open={!!subtaskParent}
+        onClose={() => setSubtaskParent(null)}
+        onCreate={async (title) => {
+          if (!subtaskParent) return;
+          const created = await createTask({
+            title,
+            parent_id: subtaskParent.id,
+          });
+          onTasksChange([created, ...tasks]);
+        }}
+      />
+
+      {rowMenu && (
+        <TaskRowMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          onClose={() => setRowMenu(null)}
+          onEdit={() => {
+            setDetailTask(rowMenu.task);
+            setRowMenu(null);
+          }}
+          onCreateSubtask={() => {
+            setSubtaskParent(rowMenu.task);
+            setRowMenu(null);
+          }}
+          onDelete={() => {
+            setPendingDelete(rowMenu.task);
+            setRowMenu(null);
+          }}
+        />
+      )}
     </div>
   );
 }

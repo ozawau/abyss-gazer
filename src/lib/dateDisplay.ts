@@ -18,18 +18,31 @@ export function formatWeekday(date = new Date()): string {
   return WEEKDAYS[date.getDay()] ?? "";
 }
 
-export function formatLunarDate(date = new Date()): string {
+function lunarFromSolar(date: Date) {
   const result = solarLunar.solar2lunar(
     date.getFullYear(),
     date.getMonth() + 1,
     date.getDate(),
   );
-  if (result === -1) return "";
+  if (result === -1) return null;
   const month =
     result.isLeap && !result.monthCn.includes("闰")
       ? `闰${result.monthCn}`
       : result.monthCn;
-  return `农历${month}${result.dayCn}`;
+  return { month, dayCn: result.dayCn, lDay: result.lDay };
+}
+
+export function formatLunarDate(date = new Date()): string {
+  const lunar = lunarFromSolar(date);
+  if (!lunar) return "";
+  return `农历${lunar.month}${lunar.dayCn}`;
+}
+
+/** Compact lunar label for calendar cells: month name on 初一, otherwise the lunar day. */
+export function formatLunarDayShort(date: Date): string {
+  const lunar = lunarFromSolar(date);
+  if (!lunar) return "";
+  return lunar.lDay === 1 ? lunar.month : lunar.dayCn;
 }
 
 /** Split minutes into hours + remaining minutes. */

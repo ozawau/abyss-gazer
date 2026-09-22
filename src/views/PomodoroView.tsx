@@ -1,65 +1,121 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   countFocusSessionsSince,
+  countFocusSessionsTotalSince,
+  DEFAULT_POMODORO_SETTINGS,
+  PomodoroSettings,
   recordPomodoroSession,
   SessionKind,
   startOfLocalDayMs,
   Task,
 } from "../lib/api";
-
-const FOCUS_SECONDS = 25 * 60;
-const BREAK_SECONDS = 5 * 60;
+import { playPomodoroEndChime } from "../lib/pomodoroChime";
+import { formatTaskLineage, taskById } from "../lib/taskTree";
+import {
+  formatPomodoroClock,
+  pomodoroPhaseLabel,
+  type PomodoroPhase,
+  type PomodoroStatus,
+  type PomodoroTick,
+} from "../lib/pomodoroTimer";
 
 interface PomodoroViewProps {
+  tasks: Task[];
   selectedTask: Task | null;
+  settings: PomodoroSettings;
   /** Increment to engage: switch task already applied; continue focus or start new. */
   playToken?: number;
   onSessionsChanged?: () => void;
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
+  /** Whether a session is running or paused (not idle). */
+  onTimingChange?: (timing: boolean) => void;
+  onTick?: (tick: PomodoroTick) => void;
 }
 
-type TimerPhase = SessionKind;
-type TimerStatus = "idle" | "running" | "paused";
+type TimerPhase = PomodoroPhase;
+type TimerStatus = PomodoroStatus;
 
-function formatTime(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const s = Math.floor(totalSeconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${m}:${s}`;
+function plannedFor(phase: TimerPhase, settings: PomodoroSettings): number {
+  if (phase === "focus") return Math.max(1, settings.focusMinutes) * 60;
+  if (phase === "long_break") {
+    return Math.max(1, settings.longBreakMinutes) * 60;
+  }
+  return Math.max(1, settings.shortBreakMinutes) * 60;
 }
 
-function plannedFor(phase: TimerPhase): number {
-  return phase === "focus" ? FOCUS_SECONDS : BREAK_SECONDS;
+function toSessionKind(phase: TimerPhase): SessionKind {
+  return phase === "focus" ? "focus" : "break";
+}
+
+function isBreakPhase(phase: TimerPhase): boolean {
+  return phase === "break" || phase === "long_break";
 }
 
 export function PomodoroView({
+  tasks,
   selectedTask,
+  settings,
   playToken = 0,
   onSessionsChanged,
+  fullscreen = false,
+  onToggleFullscreen,
+  onTimingChange,
+  onTick,
 }: PomodoroViewProps) {
   const [phase, setPhase] = useState<TimerPhase>("focus");
   const [status, setStatus] = useState<TimerStatus>("idle");
-  const [remaining, setRemaining] = useState(FOCUS_SECONDS);
+  const [remaining, setRemaining] = useState(
+    () => plannedFor("focus", DEFAULT_POMODORO_SETTINGS),
+  );
   const [todayCount, setTodayCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [confirmStop, setConfirmStop] = useState(false);
 
   const phaseRef = useRef(phase);
   const statusRef = useRef(status);
   const remainingRef = useRef(remaining);
   const startedAtRef = useRef<number | null>(null);
-  const plannedRef = useRef(FOCUS_SECONDS);
+  const plannedRef = useRef(plannedFor("focus", DEFAULT_POMODORO_SETTINGS));
   const finishingRef = useRef(false);
   const selectedTaskRef = useRef(selectedTask);
   const sessionTaskIdRef = useRef<string | null>(null);
   const lastPlayTokenRef = useRef(0);
+  const settingsRef = useRef(settings);
+  const boundTaskKeyRef = useRef<string | null>(
+    selectedTask ? `${selectedTask.id}:${selectedTask.status}` : null,
+  );
+  const taskByIdMap = useMemo(() => taskById(tasks), [tasks]);
+  const selectedTaskTitle = selectedTask
+    ? formatTaskLineage(selectedTask, taskByIdMap)
+    : null;
+  const lastTaskTitleRef = useRef<string | null>(selectedTaskTitle);
 
   phaseRef.current = phase;
   statusRef.current = status;
   remainingRef.current = remaining;
   selectedTaskRef.current = selectedTask;
+  settingsRef.current = settings;
+  if (selectedTaskTitle) lastTaskTitleRef.current = selectedTaskTitle;
+
+  useEffect(() => {
+    onTimingChange?.(status === "running" || status === "paused");
+    onTick?.({ status, remaining, phase });
+  }, [status, remaining, phase, onTimingChange, onTick]);
+
+  // Apply duration changes while idle so the next session uses new settings.
+  useEffect(() => {
+    if (statusRef.current !== "idle" || startedAtRef.current != null) return;
+    if (!settings.breaksEnabled && isBreakPhase(phaseRef.current)) {
+      setPhase("focus");
+      const next = plannedFor("focus", settings);
+      plannedRef.current = next;
+      setRemaining(next);
+      return;
+    }
+    const next = plannedFor(phaseRef.current, settings);
+    plannedRef.current = next;
+    setRemaining(next);
+  }, [settings]);
 
   useEffect(() => {
     if (!selectedTask) {
@@ -83,7 +139,7 @@ export function PomodoroView({
     const id = taskId ?? sessionTaskIdRef.current ?? selectedTaskRef.current?.id;
     if (!id || startedAtRef.current == null) return;
     const endedAt = Date.now();
-    const kind = phaseRef.current;
+    const kind = toSessionKind(phaseRef.current);
     try {
       await recordPomodoroSession({
         task_id: id,
@@ -99,26 +155,108 @@ export function PomodoroView({
         if (selectedTaskRef.current?.id === id) setTodayCount(n);
       }
     } catch (err) {
+      const message = String(err);
+      if (message.includes("Task not found")) return;
+      setError(message);
+    }
+  }
+
+  async function resolveNextPhaseAfterFocus(
+    completedFocus: boolean,
+  ): Promise<TimerPhase> {
+    const cfg = settingsRef.current;
+    if (!cfg.breaksEnabled) return "focus";
+    if (!completedFocus) return "break";
+
+    try {
+      const todayTotal = await countFocusSessionsTotalSince(startOfLocalDayMs());
+      if (
+        cfg.longBreakEnabled &&
+        cfg.longBreakInterval > 0 &&
+        todayTotal > 0 &&
+        todayTotal % cfg.longBreakInterval === 0
+      ) {
+        return "long_break";
+      }
+    } catch (err) {
       setError(String(err));
     }
+    return "break";
+  }
+
+  async function nextPhaseFrom(
+    current: TimerPhase,
+    completed: boolean,
+  ): Promise<TimerPhase> {
+    if (current === "focus") {
+      return resolveNextPhaseAfterFocus(completed);
+    }
+    return "focus";
+  }
+
+  function maybeAutoStart(nextPhase: TimerPhase) {
+    const cfg = settingsRef.current;
+    const shouldAuto =
+      (nextPhase === "focus" && cfg.autoStartFocus) ||
+      (isBreakPhase(nextPhase) && cfg.autoStartBreak && cfg.breaksEnabled);
+    if (!shouldAuto || !selectedTaskRef.current) return;
+    window.setTimeout(() => {
+      if (statusRef.current !== "idle" || finishingRef.current) return;
+      if (!selectedTaskRef.current) return;
+      startedAtRef.current = Date.now();
+      sessionTaskIdRef.current = selectedTaskRef.current.id;
+      plannedRef.current = plannedFor(nextPhase, settingsRef.current);
+      setRemaining(plannedRef.current);
+      setStatus("running");
+    }, 0);
   }
 
   async function finishSegment(completed: boolean) {
     if (finishingRef.current) return;
     finishingRef.current = true;
     setStatus("idle");
+    const current = phaseRef.current;
+    if (completed) {
+      const endedBreak = isBreakPhase(current);
+      void playPomodoroEndChime(
+        endedBreak ? "break" : "focus",
+        endedBreak
+          ? settingsRef.current.breakEndSound
+          : settingsRef.current.focusEndSound,
+      );
+    }
     await persistSession(completed);
     startedAtRef.current = null;
     sessionTaskIdRef.current = null;
 
-    const nextPhase: TimerPhase =
-      phaseRef.current === "focus" ? "break" : "focus";
-    const nextPlanned = plannedFor(nextPhase);
+    const nextPhase = await nextPhaseFrom(current, completed);
+    const nextPlanned = plannedFor(nextPhase, settingsRef.current);
     setPhase(nextPhase);
     plannedRef.current = nextPlanned;
     setRemaining(nextPlanned);
     finishingRef.current = false;
+    maybeAutoStart(nextPhase);
   }
+
+  useEffect(() => {
+    const next = selectedTask
+      ? `${selectedTask.id}:${selectedTask.status}`
+      : null;
+    const prev = boundTaskKeyRef.current;
+    boundTaskKeyRef.current = next;
+
+    if (statusRef.current !== "running") return;
+
+    const deleted = prev != null && next == null;
+    const completed =
+      selectedTask?.status === "done" &&
+      prev != null &&
+      prev.endsWith(":todo") &&
+      prev.startsWith(`${selectedTask.id}:`);
+    if (deleted || completed) {
+      setStatus("paused");
+    }
+  }, [selectedTask]);
 
   useEffect(() => {
     if (status !== "running") return;
@@ -141,9 +279,19 @@ export function PomodoroView({
     if (!selectedTaskRef.current) return;
     setError(null);
     if (statusRef.current === "idle") {
+      if (
+        isBreakPhase(phaseRef.current) &&
+        !settingsRef.current.breaksEnabled
+      ) {
+        setPhase("focus");
+        phaseRef.current = "focus";
+        const next = plannedFor("focus", settingsRef.current);
+        plannedRef.current = next;
+        setRemaining(next);
+      }
       startedAtRef.current = Date.now();
       sessionTaskIdRef.current = selectedTaskRef.current.id;
-      plannedRef.current = plannedFor(phaseRef.current);
+      plannedRef.current = plannedFor(phaseRef.current, settingsRef.current);
       if (remainingRef.current <= 0) {
         setRemaining(plannedRef.current);
       }
@@ -158,9 +306,8 @@ export function PomodoroView({
   async function skip() {
     if (!selectedTaskRef.current) return;
     if (statusRef.current === "idle" && startedAtRef.current == null) {
-      const nextPhase: TimerPhase =
-        phaseRef.current === "focus" ? "break" : "focus";
-      const nextPlanned = plannedFor(nextPhase);
+      const nextPhase = await nextPhaseFrom(phaseRef.current, false);
+      const nextPlanned = plannedFor(nextPhase, settingsRef.current);
       setPhase(nextPhase);
       plannedRef.current = nextPlanned;
       setRemaining(nextPlanned);
@@ -178,14 +325,9 @@ export function PomodoroView({
     finishingRef.current = false;
     setStatus("idle");
     setPhase("focus");
-    plannedRef.current = FOCUS_SECONDS;
-    setRemaining(FOCUS_SECONDS);
-    setConfirmStop(false);
-  }
-
-  async function confirmStopTimer() {
-    setConfirmStop(false);
-    await reset();
+    const next = plannedFor("focus", settingsRef.current);
+    plannedRef.current = next;
+    setRemaining(next);
   }
 
   useEffect(() => {
@@ -225,23 +367,37 @@ export function PomodoroView({
       startedAtRef.current = Date.now();
       sessionTaskIdRef.current = task.id;
       setPhase("focus");
-      plannedRef.current = FOCUS_SECONDS;
-      setRemaining(FOCUS_SECONDS);
+      const next = plannedFor("focus", settingsRef.current);
+      plannedRef.current = next;
+      setRemaining(next);
       setStatus("running");
     })();
   }, [playToken]);
 
   const progress =
     plannedRef.current > 0 ? 1 - remaining / plannedRef.current : 0;
+  const ringPhase = phase === "focus" ? "focus" : "break";
 
   return (
-    <div className="view pomodoro-view">
-      <header className="view-header">
-        <h1>番茄钟</h1>
-        <p>选中任务后再开始专注。</p>
+    <div className={`view pomodoro-view${fullscreen ? " is-fullscreen" : ""}`}>
+      <header className="view-header pomodoro-header">
+        <div className="pomodoro-header-text">
+          <h1>番茄钟</h1>
+          <p>选中任务后再开始专注。</p>
+        </div>
+        {onToggleFullscreen && (
+          <button
+            type="button"
+            className="secondary-btn pomodoro-fullscreen-btn"
+            onClick={onToggleFullscreen}
+            title={fullscreen ? "退出全屏" : "应用内全屏"}
+          >
+            {fullscreen ? "退出全屏" : "全屏"}
+          </button>
+        )}
       </header>
 
-      {!selectedTask ? (
+      {!selectedTask && status === "idle" ? (
         <div className="pomodoro-locked">
           <p>请先在「任务」中选择一个任务。</p>
         </div>
@@ -249,19 +405,23 @@ export function PomodoroView({
         <div className="pomodoro-panel">
           <div className="pomodoro-task">
             <span className="chip-label">专注于</span>
-            <strong>{selectedTask.title}</strong>
-            <span className="focus-count">今日专注 {todayCount} 次</span>
+            <strong>
+              {selectedTaskTitle ?? lastTaskTitleRef.current ?? "任务已删除"}
+            </strong>
+            {selectedTask ? (
+              <span className="focus-count">今日专注 {todayCount} 次</span>
+            ) : (
+              <span className="focus-count">任务已删除，计时已暂停</span>
+            )}
           </div>
 
           <div
-            className={`timer-ring phase-${phase}`}
+            className={`timer-ring phase-${ringPhase}`}
             style={{ ["--progress" as string]: String(progress) }}
           >
             <div className="timer-face">
-              <span className="timer-phase">
-                {phase === "focus" ? "专注" : "休息"}
-              </span>
-              <span className="timer-digits">{formatTime(remaining)}</span>
+              <span className="timer-phase">{pomodoroPhaseLabel(phase)}</span>
+              <span className="timer-digits">{formatPomodoroClock(remaining)}</span>
               <span className="timer-status">
                 {status === "running"
                   ? "进行中"
@@ -274,21 +434,17 @@ export function PomodoroView({
 
           <div className="timer-controls">
             {status !== "running" ? (
-              <button type="button" className="primary-btn" onClick={start}>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={start}
+                disabled={!selectedTask}
+              >
                 {status === "paused" ? "继续" : "开始"}
               </button>
             ) : (
               <button type="button" className="primary-btn" onClick={pause}>
                 暂停
-              </button>
-            )}
-            {(status === "running" || status === "paused") && (
-              <button
-                type="button"
-                className="danger-btn timer-stop-btn"
-                onClick={() => setConfirmStop(true)}
-              >
-                停止
               </button>
             )}
             <button type="button" className="secondary-btn" onClick={skip}>
@@ -297,47 +453,6 @@ export function PomodoroView({
             <button type="button" className="secondary-btn" onClick={reset}>
               重置
             </button>
-          </div>
-        </div>
-      )}
-
-      {confirmStop && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onClick={() => setConfirmStop(false)}
-        >
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="stop-timer-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="stop-timer-title">停止计时</h2>
-            <div className="delete-confirm">
-              <p>
-                确定停止当前
-                {phase === "focus" ? "专注" : "休息"}
-                计时？未完成的时段将不会计入完成次数。
-              </p>
-              <div className="delete-confirm-actions">
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  onClick={() => setConfirmStop(false)}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className="danger-btn"
-                  onClick={() => void confirmStopTimer()}
-                >
-                  确认停止
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}

@@ -128,10 +128,99 @@ pub fn count_focus_sessions_since(
     .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn count_focus_sessions_total_since(
+    db: State<'_, DbState>,
+    since_ms: i64,
+) -> Result<i64, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT COUNT(*) FROM pomodoro_sessions
+         WHERE kind = 'focus'
+           AND completed = 1
+           AND started_at >= ?1",
+        [since_ms],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FocusCountRow {
     pub task_id: String,
     pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FirstFocusStart {
+    pub task_id: String,
+    pub started_at: i64,
+}
+
+#[tauri::command]
+pub fn list_first_completed_focus_starts(
+    db: State<'_, DbState>,
+) -> Result<Vec<FirstFocusStart>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT task_id, MIN(started_at)
+             FROM pomodoro_sessions
+             WHERE kind = 'focus'
+               AND completed = 1
+             GROUP BY task_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(FirstFocusStart {
+                task_id: row.get(0)?,
+                started_at: row.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.map(|row| row.map_err(|e| e.to_string())).collect()
+}
+
+#[tauri::command]
+pub fn list_pomodoro_sessions_in_range(
+    db: State<'_, DbState>,
+    start_ms: i64,
+    end_ms: i64,
+) -> Result<Vec<PomodoroSession>, String> {
+    if end_ms <= start_ms {
+        return Err("end_ms must be after start_ms".into());
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, task_id, kind, planned_seconds, started_at, ended_at, completed
+             FROM pomodoro_sessions
+             WHERE kind = 'focus'
+               AND completed = 1
+               AND started_at < ?2
+               AND ended_at > ?1
+             ORDER BY started_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![start_ms, end_ms], |row| {
+            Ok(PomodoroSession {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                kind: row.get(2)?,
+                planned_seconds: row.get(3)?,
+                started_at: row.get(4)?,
+                ended_at: row.get(5)?,
+                completed: row.get::<_, i64>(6)? != 0,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
 }
 
 #[tauri::command]

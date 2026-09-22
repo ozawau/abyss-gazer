@@ -18,10 +18,12 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   sort_order: number;
+  parent_id: string | null;
   category_id: string | null;
   estimate_pomodoros: number;
   completed_pomodoros: number;
   due_at: number | null;
+  start_at: number | null;
   completed_at: number | null;
   created_at: number;
   updated_at: number;
@@ -47,6 +49,7 @@ export function createTask(input: {
   priority?: TaskPriority;
   category_id?: string | null;
   estimate_pomodoros?: number;
+  parent_id?: string | null;
 }): Promise<Task> {
   return invoke("create_task", {
     input: {
@@ -55,6 +58,7 @@ export function createTask(input: {
       priority: input.priority ?? "high",
       category_id: input.category_id ?? null,
       estimate_pomodoros: input.estimate_pomodoros ?? 0,
+      parent_id: input.parent_id ?? null,
     },
   });
 }
@@ -68,6 +72,7 @@ export function updateTask(input: {
   category_id?: string | null;
   estimate_pomodoros?: number;
   due_at?: number | null;
+  start_at?: number | null;
 }): Promise<Task> {
   const payload: Record<string, unknown> = { id: input.id };
   if (input.title !== undefined) payload.title = input.title;
@@ -79,6 +84,7 @@ export function updateTask(input: {
     payload.estimate_pomodoros = input.estimate_pomodoros;
   }
   if (input.due_at !== undefined) payload.due_at = input.due_at;
+  if (input.start_at !== undefined) payload.start_at = input.start_at;
   return invoke("update_task", { input: payload });
 }
 
@@ -102,6 +108,58 @@ export function deleteTask(id: string): Promise<void> {
 
 export function getTask(id: string): Promise<Task> {
   return invoke("get_task", { id });
+}
+
+export interface HabitCheckin {
+  task_id: string;
+  day: string;
+  note: string;
+}
+
+export interface HabitCheckinItem {
+  habit_id: string;
+  task_id: string;
+  day: string;
+}
+
+export function listHabitCheckins(
+  startDay: string,
+  endDay: string,
+): Promise<HabitCheckin[]> {
+  return invoke("list_habit_checkins", { startDay, endDay });
+}
+
+export function listHabitCheckinItems(
+  startDay: string,
+  endDay: string,
+): Promise<HabitCheckinItem[]> {
+  return invoke("list_habit_checkin_items", { startDay, endDay });
+}
+
+export function saveHabitCheckin(input: {
+  taskId: string;
+  day: string;
+  checked: boolean;
+  note: string;
+  taskIds: string[];
+}): Promise<void> {
+  return invoke("save_habit_checkin", {
+    input: {
+      task_id: input.taskId,
+      day: input.day,
+      checked: input.checked,
+      note: input.note,
+      task_ids: input.taskIds,
+    },
+  });
+}
+
+/** Returns whether the task is checked in after the toggle. */
+export function toggleHabitCheckin(
+  taskId: string,
+  day: string,
+): Promise<boolean> {
+  return invoke("toggle_habit_checkin", { taskId, day });
 }
 
 export function listCategories(): Promise<Category[]> {
@@ -161,6 +219,123 @@ export function listFocusCountsSince(sinceMs: number): Promise<FocusCountRow[]> 
   return invoke("list_focus_counts_since", { sinceMs });
 }
 
+export interface FirstFocusStart {
+  task_id: string;
+  started_at: number;
+}
+
+export function listFirstCompletedFocusStarts(): Promise<FirstFocusStart[]> {
+  return invoke("list_first_completed_focus_starts");
+}
+
+export function listPomodoroSessionsInRange(
+  startMs: number,
+  endMs: number,
+): Promise<PomodoroSession[]> {
+  return invoke("list_pomodoro_sessions_in_range", {
+    startMs,
+    endMs,
+  });
+}
+
+export function countFocusSessionsTotalSince(sinceMs: number): Promise<number> {
+  return invoke("count_focus_sessions_total_since", { sinceMs });
+}
+
+export interface PomodoroSettings {
+  focusMinutes: number;
+  breaksEnabled: boolean;
+  shortBreakMinutes: number;
+  longBreakEnabled: boolean;
+  longBreakMinutes: number;
+  longBreakInterval: number;
+  autoStartFocus: boolean;
+  autoStartBreak: boolean;
+  focusEndSound: string | null;
+  breakEndSound: string | null;
+}
+
+export const DEFAULT_POMODORO_SETTINGS: PomodoroSettings = {
+  focusMinutes: 25,
+  breaksEnabled: true,
+  shortBreakMinutes: 5,
+  longBreakEnabled: true,
+  longBreakMinutes: 15,
+  longBreakInterval: 4,
+  autoStartFocus: false,
+  autoStartBreak: false,
+  focusEndSound: null,
+  breakEndSound: null,
+};
+
+export function readSoundFile(path: string): Promise<number[]> {
+  return invoke("read_sound_file", { path });
+}
+
+export function getPomodoroSettings(): Promise<PomodoroSettings> {
+  return invoke("get_pomodoro_settings");
+}
+
+export function setPomodoroSettings(
+  settings: PomodoroSettings,
+): Promise<PomodoroSettings> {
+  return invoke("set_pomodoro_settings", { settings });
+}
+
 export function getDbPath(): Promise<string> {
   return invoke("get_db_path");
+}
+
+export type SyncMethod = "local" | "git";
+export type SyncIntervalMinutes = 5 | 10 | 30;
+
+/** 0=周日 … 6=周六，与 `Date.getDay()` 一致 */
+export type WeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export interface SystemSettings {
+  dataDir: string | null;
+  syncEnabled: boolean;
+  syncMethod: SyncMethod;
+  syncIntervalMinutes: SyncIntervalMinutes;
+  localBackupDir: string | null;
+  gitCommitMessage: string;
+  weekStartsOn: WeekStartsOn;
+  ganttActivityMode: "discrete" | "continuous";
+}
+
+export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  dataDir: null,
+  syncEnabled: false,
+  syncMethod: "local",
+  syncIntervalMinutes: 10,
+  localBackupDir: null,
+  gitCommitMessage: "chore: sync Abyss Gazer data",
+  weekStartsOn: 1,
+  ganttActivityMode: "discrete",
+};
+
+export function getSystemSettings(): Promise<SystemSettings> {
+  return invoke("get_system_settings");
+}
+
+export function setSystemSettings(
+  settings: SystemSettings,
+): Promise<SystemSettings> {
+  return invoke("set_system_settings", { settings });
+}
+
+export function getDefaultDataDir(): Promise<string> {
+  return invoke("get_default_data_dir");
+}
+
+export function getActiveDataDir(): Promise<string> {
+  return invoke("get_active_data_dir");
+}
+
+export function setDataDirectory(path: string): Promise<SystemSettings> {
+  return invoke("set_data_directory", { path });
+}
+
+export function runDataSync(): Promise<void> {
+  return invoke("run_data_sync");
 }
