@@ -6,8 +6,8 @@ interface CategoryPickerProps {
   value: string | null;
   disabled?: boolean;
   onChange: (categoryId: string | null) => void;
-  onRequestCreate: () => void;
-  onRequestEdit: (category: Category) => void;
+  onRequestCreate?: () => void;
+  onRequestEdit?: (category: Category) => void;
   compact?: boolean;
 }
 
@@ -101,31 +101,35 @@ export function CategoryPicker({
                 />
                 {c.name}
               </button>
-              <button
-                type="button"
-                className="category-option-edit"
-                title="编辑分类"
-                aria-label={`编辑分类「${c.name}」`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpen(false);
-                  onRequestEdit(c);
-                }}
-              >
-                编辑
-              </button>
+              {onRequestEdit && (
+                <button
+                  type="button"
+                  className="category-option-edit"
+                  title="编辑分类"
+                  aria-label={`编辑分类「${c.name}」`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpen(false);
+                    onRequestEdit(c);
+                  }}
+                >
+                  编辑
+                </button>
+              )}
             </div>
           ))}
-          <button
-            type="button"
-            className="category-option category-option-add"
-            onClick={() => {
-              setOpen(false);
-              onRequestCreate();
-            }}
-          >
-            + 添加分类
-          </button>
+          {onRequestCreate && (
+            <button
+              type="button"
+              className="category-option category-option-add"
+              onClick={() => {
+                setOpen(false);
+                onRequestCreate();
+              }}
+            >
+              + 添加分类
+            </button>
+          )}
         </div>
       )}
     </div>

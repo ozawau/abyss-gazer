@@ -31,6 +31,7 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
             priority TEXT NOT NULL DEFAULT 'medium'
                 CHECK(priority IN ('high', 'medium', 'low')),
             sort_order INTEGER NOT NULL DEFAULT 0,
+            parent_id TEXT,
             category_id TEXT,
             estimate_pomodoros INTEGER NOT NULL DEFAULT 0,
             due_at INTEGER,
@@ -174,6 +175,52 @@ fn migrate_schema(conn: &Connection) -> SqliteResult<()> {
         );",
     )?;
 
+    let mut stmt = conn.prepare("PRAGMA table_info(tasks)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !cols.iter().any(|c| c == "parent_id") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN parent_id TEXT", [])?;
+    }
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id);")?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS habit_checkins (
+            task_id TEXT NOT NULL,
+            day TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (task_id, day),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_habit_checkins_day ON habit_checkins(day);",
+    )?;
+
+    let mut stmt = conn.prepare("PRAGMA table_info(habit_checkins)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !cols.iter().any(|c| c == "note") {
+        conn.execute(
+            "ALTER TABLE habit_checkins ADD COLUMN note TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS habit_checkin_items (
+            habit_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            day TEXT NOT NULL,
+            PRIMARY KEY (habit_id, task_id, day),
+            FOREIGN KEY (habit_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_habit_checkin_items_day
+            ON habit_checkin_items(day);",
+    )?;
+
     Ok(())
 }
 
@@ -278,6 +325,59 @@ mod tests {
             .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
             .expect("select");
         assert_eq!(title, "Hello");
+        conn.execute(
+            "INSERT INTO habit_checkins (task_id, day, created_at) VALUES ('t1', '2026-09-22', 1)",
+            [],
+        )
+        .expect("checkin");
+        let day: String = conn
+            .query_row(
+                "SELECT day FROM habit_checkins WHERE task_id = 't1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("select checkin");
+        assert_eq!(day, "2026-09-22");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn migrates_parent_id_before_creating_index() {
+        let path = std::env::temp_dir().join(format!(
+            "abyss-gazer-parent-{}.db",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    notes TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    priority TEXT NOT NULL DEFAULT 'medium',
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    category_id TEXT,
+                    estimate_pomodoros INTEGER NOT NULL DEFAULT 0,
+                    due_at INTEGER,
+                    start_at INTEGER,
+                    completed_at INTEGER,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                INSERT INTO tasks (id, title, notes, status, priority, sort_order, created_at, updated_at)
+                VALUES ('t1', 'Old', '', 'todo', 'medium', 0, 1, 1);",
+            )
+            .unwrap();
+        }
+        let conn = open_db(&path).expect("open migrates parent_id");
+        let parent_id: Option<String> = conn
+            .query_row("SELECT parent_id FROM tasks WHERE id = 't1'", [], |r| r.get(0))
+            .expect("parent_id");
+        assert!(parent_id.is_none());
         let _ = std::fs::remove_file(path);
     }
 

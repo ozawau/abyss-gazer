@@ -170,6 +170,20 @@ export function focusSessionsOnDay(
   return sessions.filter((s) => sessionIntersectsDay(s, day));
 }
 
+/** Completed focus sessions that started on this local day. */
+export function completedFocusCountOnDay(
+  sessions: PomodoroSession[],
+  day: Date,
+): number {
+  const start = startOfLocalDay(day).getTime();
+  const end = addDays(startOfLocalDay(day), 1).getTime();
+  let count = 0;
+  for (const session of sessions) {
+    if (session.started_at >= start && session.started_at < end) count += 1;
+  }
+  return count;
+}
+
 /** Clip session to a local calendar day for vertical layout (minutes from midnight). */
 export function clipSessionToDay(
   session: PomodoroSession,

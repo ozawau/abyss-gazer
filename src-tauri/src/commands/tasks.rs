@@ -11,6 +11,7 @@ pub struct Task {
     pub status: String,
     pub priority: String,
     pub sort_order: i64,
+    pub parent_id: Option<String>,
     pub category_id: Option<String>,
     pub estimate_pomodoros: i64,
     pub completed_pomodoros: i64,
@@ -28,6 +29,7 @@ pub struct CreateTaskInput {
     pub priority: Option<String>,
     pub category_id: Option<String>,
     pub estimate_pomodoros: Option<i64>,
+    pub parent_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,32 +88,99 @@ fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         status: row.get(3)?,
         priority: row.get(4)?,
         sort_order: row.get(5)?,
-        category_id: row.get(6)?,
-        estimate_pomodoros: row.get(7)?,
-        due_at: row.get(8)?,
-        start_at: row.get(9)?,
-        completed_at: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
-        completed_pomodoros: row.get(13)?,
+        parent_id: row.get(6)?,
+        category_id: row.get(7)?,
+        estimate_pomodoros: row.get(8)?,
+        due_at: row.get(9)?,
+        start_at: row.get(10)?,
+        completed_at: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
+        completed_pomodoros: row.get(14)?,
     })
 }
 
 const TASK_SELECT: &str = "SELECT t.id, t.title, t.notes, t.status, t.priority, t.sort_order,
-       t.category_id, t.estimate_pomodoros, t.due_at, t.start_at, t.completed_at, t.created_at, t.updated_at,
+       t.parent_id, t.category_id, t.estimate_pomodoros, t.due_at, t.start_at, t.completed_at, t.created_at, t.updated_at,
        (SELECT COUNT(*) FROM pomodoro_sessions p
          WHERE p.task_id = t.id AND p.kind = 'focus' AND p.completed = 1) AS completed_pomodoros
      FROM tasks t";
 
-fn next_sort_order_front(conn: &rusqlite::Connection, priority: &str) -> Result<i64, String> {
-    let min: Option<i64> = conn
-        .query_row(
-            "SELECT MIN(sort_order) FROM tasks WHERE priority = ?1",
+fn next_sort_order_front(
+    conn: &rusqlite::Connection,
+    priority: &str,
+    parent_id: Option<&str>,
+) -> Result<i64, String> {
+    let min: Option<i64> = if let Some(parent_id) = parent_id {
+        conn.query_row(
+            "SELECT MIN(sort_order) FROM tasks WHERE parent_id = ?1",
+            [parent_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?
+    } else {
+        conn.query_row(
+            "SELECT MIN(sort_order) FROM tasks WHERE parent_id IS NULL AND priority = ?1",
             [priority],
             |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+    };
     Ok(min.map(|m| m - 1).unwrap_or(0))
+}
+
+fn next_sort_order_end(
+    conn: &rusqlite::Connection,
+    parent_id: &str,
+) -> Result<i64, String> {
+    let max: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(sort_order) FROM tasks WHERE parent_id = ?1",
+            [parent_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(max.map(|m| m + 1).unwrap_or(0))
+}
+
+fn collect_descendant_ids(
+    conn: &rusqlite::Connection,
+    root_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut ids = Vec::new();
+    let mut stack = vec![root_id.to_string()];
+    while let Some(id) = stack.pop() {
+        let mut stmt = conn
+            .prepare("SELECT id FROM tasks WHERE parent_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([&id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let child = row.map_err(|e| e.to_string())?;
+            stack.push(child.clone());
+            ids.push(child);
+        }
+    }
+    Ok(ids)
+}
+
+fn cascade_field(
+    conn: &rusqlite::Connection,
+    root_id: &str,
+    sql: &str,
+    value: rusqlite::types::Value,
+    updated_at: i64,
+) -> Result<(), String> {
+    let ids = collect_descendant_ids(conn, root_id)?;
+    for id in ids {
+        conn.execute(
+            sql,
+            rusqlite::params![value.clone(), updated_at, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn ensure_category_exists(
@@ -195,15 +264,24 @@ pub fn create_task(
     let ts = now_ms();
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    if let Some(ref category_id) = input.category_id {
-        ensure_category_exists(&conn, category_id)?;
-    }
-    let sort_order = next_sort_order_front(&conn, &priority)?;
+
+    let (priority, category_id, parent_id, sort_order) =
+        if let Some(ref parent_id) = input.parent_id {
+            let parent = fetch_task(&conn, parent_id)?;
+            let sort_order = next_sort_order_end(&conn, parent_id)?;
+            (parent.priority, parent.category_id, Some(parent.id), sort_order)
+        } else {
+            if let Some(ref category_id) = input.category_id {
+                ensure_category_exists(&conn, category_id)?;
+            }
+            let sort_order = next_sort_order_front(&conn, &priority, None)?;
+            (priority, input.category_id, None, sort_order)
+        };
 
     conn.execute(
-        "INSERT INTO tasks (id, title, notes, status, priority, sort_order, category_id,
+        "INSERT INTO tasks (id, title, notes, status, priority, sort_order, parent_id, category_id,
          estimate_pomodoros, due_at, start_at, completed_at, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         rusqlite::params![
             id,
             title,
@@ -211,7 +289,8 @@ pub fn create_task(
             "todo",
             priority,
             sort_order,
-            input.category_id,
+            parent_id,
+            category_id,
             estimate_pomodoros,
             Option::<i64>::None,
             Option::<i64>::None,
@@ -253,21 +332,26 @@ pub fn update_task(
     let existing = fetch_task(&conn, &input.id)?;
 
     let previous_status = existing.status.clone();
+    let is_subtask = existing.parent_id.is_some();
     let title = input
         .title
         .map(|t| t.trim().to_string())
         .unwrap_or(existing.title);
     let notes = input.notes.unwrap_or(existing.notes);
     let status = input.status.unwrap_or(existing.status);
-    let priority = input.priority.unwrap_or_else(|| existing.priority.clone());
+    let priority = if is_subtask {
+        existing.priority.clone()
+    } else {
+        input.priority.unwrap_or_else(|| existing.priority.clone())
+    };
     let estimate_pomodoros = input
         .estimate_pomodoros
         .unwrap_or(existing.estimate_pomodoros);
     let mut sort_order = existing.sort_order;
-    if priority != existing.priority {
+    if !is_subtask && priority != existing.priority {
         let max: Option<i64> = conn
             .query_row(
-                "SELECT MAX(sort_order) FROM tasks WHERE priority = ?1",
+                "SELECT MAX(sort_order) FROM tasks WHERE parent_id IS NULL AND priority = ?1",
                 [&priority],
                 |row| row.get(0),
             )
@@ -275,14 +359,21 @@ pub fn update_task(
         sort_order = max.map(|m| m + 1).unwrap_or(0);
     }
 
-    let category_id = match input.category_id {
-        None => existing.category_id,
-        Some(None) => None,
-        Some(Some(id)) => {
-            ensure_category_exists(&conn, &id)?;
-            Some(id)
+    let category_id = if is_subtask {
+        existing.category_id.clone()
+    } else {
+        match input.category_id {
+            None => existing.category_id.clone(),
+            Some(None) => None,
+            Some(Some(id)) => {
+                ensure_category_exists(&conn, &id)?;
+                Some(id)
+            }
         }
     };
+
+    let category_changed = category_id != existing.category_id;
+    let priority_changed = priority != existing.priority;
 
     let due_at = match input.due_at {
         None => existing.due_at,
@@ -329,6 +420,29 @@ pub fn update_task(
     )
     .map_err(|e| e.to_string())?;
 
+    if !is_subtask && category_changed {
+        let value = match &category_id {
+            Some(id) => rusqlite::types::Value::Text(id.clone()),
+            None => rusqlite::types::Value::Null,
+        };
+        cascade_field(
+            &conn,
+            &input.id,
+            "UPDATE tasks SET category_id = ?1, updated_at = ?2 WHERE id = ?3",
+            value,
+            updated_at,
+        )?;
+    }
+    if !is_subtask && priority_changed {
+        cascade_field(
+            &conn,
+            &input.id,
+            "UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::types::Value::Text(priority),
+            updated_at,
+        )?;
+    }
+
     fetch_task(&conn, &input.id)
 }
 
@@ -347,28 +461,38 @@ pub fn reorder_task(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     let moving = fetch_task(&conn, &input.id)?;
+    let sibling_parent = moving.parent_id.clone();
 
     if let Some(ref before_id) = input.before_id {
-        let before_priority: String = conn
-            .query_row(
-                "SELECT priority FROM tasks WHERE id = ?1",
-                [before_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if before_priority != input.priority {
+        let before = fetch_task(&conn, before_id)?;
+        if before.parent_id != sibling_parent {
+            return Err("Cannot reorder a task outside its parent".into());
+        }
+        if sibling_parent.is_none() && before.priority != input.priority {
             return Err("before_id is not in the target priority group".into());
         }
     }
 
-    let mut ordered_ids: Vec<String> = {
+    let mut ordered_ids: Vec<String> = if let Some(ref parent_id) = sibling_parent {
         let mut stmt = conn
             .prepare(
-                "SELECT id FROM tasks WHERE priority = ?1 ORDER BY sort_order ASC, created_at ASC",
+                "SELECT id FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([&input.priority], |row| row.get(0))
+            .query_map([parent_id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok())
+            .filter(|id| id != &input.id)
+            .collect()
+    } else {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id FROM tasks WHERE parent_id IS NULL AND priority = ?1 ORDER BY sort_order ASC, created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([input.priority.as_str()], |row| row.get::<_, String>(0))
             .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok())
             .filter(|id| id != &input.id)
@@ -385,12 +509,27 @@ pub fn reorder_task(
     ordered_ids.insert(insert_at, input.id.clone());
 
     let updated_at = now_ms();
+    let next_priority = if sibling_parent.is_some() {
+        moving.priority.clone()
+    } else {
+        input.priority.clone()
+    };
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute(
         "UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3",
-        rusqlite::params![input.priority, updated_at, input.id],
+        rusqlite::params![next_priority, updated_at, input.id],
     )
     .map_err(|e| e.to_string())?;
+
+    if sibling_parent.is_none() && moving.priority != input.priority {
+        cascade_field(
+            &tx,
+            &input.id,
+            "UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::types::Value::Text(input.priority.clone()),
+            updated_at,
+        )?;
+    }
 
     for (idx, id) in ordered_ids.iter().enumerate() {
         tx.execute(
@@ -401,11 +540,11 @@ pub fn reorder_task(
     }
     tx.commit().map_err(|e| e.to_string())?;
 
-    if moving.priority != input.priority {
+    if sibling_parent.is_none() && moving.priority != input.priority {
         let old_ids: Vec<String> = {
             let mut stmt = conn
                 .prepare(
-                    "SELECT id FROM tasks WHERE priority = ?1 ORDER BY sort_order ASC, created_at ASC",
+                    "SELECT id FROM tasks WHERE parent_id IS NULL AND priority = ?1 ORDER BY sort_order ASC, created_at ASC",
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt
@@ -428,11 +567,12 @@ pub fn reorder_task(
 #[tauri::command]
 pub fn delete_task(db: State<'_, DbState>, id: String) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let changed = conn
-        .execute("DELETE FROM tasks WHERE id = ?1", [&id])
-        .map_err(|e| e.to_string())?;
-    if changed == 0 {
-        return Err("Task not found".into());
+    fetch_task(&conn, &id)?;
+    let mut ids = collect_descendant_ids(&conn, &id)?;
+    ids.push(id);
+    for task_id in ids.into_iter().rev() {
+        conn.execute("DELETE FROM tasks WHERE id = ?1", [&task_id])
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }

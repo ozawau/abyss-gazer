@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   countFocusSessionsSince,
   countFocusSessionsTotalSince,
@@ -9,6 +9,8 @@ import {
   startOfLocalDayMs,
   Task,
 } from "../lib/api";
+import { playPomodoroEndChime } from "../lib/pomodoroChime";
+import { formatTaskLineage, taskById } from "../lib/taskTree";
 import {
   formatPomodoroClock,
   pomodoroPhaseLabel,
@@ -18,6 +20,7 @@ import {
 } from "../lib/pomodoroTimer";
 
 interface PomodoroViewProps {
+  tasks: Task[];
   selectedTask: Task | null;
   settings: PomodoroSettings;
   /** Increment to engage: switch task already applied; continue focus or start new. */
@@ -50,6 +53,7 @@ function isBreakPhase(phase: TimerPhase): boolean {
 }
 
 export function PomodoroView({
+  tasks,
   selectedTask,
   settings,
   playToken = 0,
@@ -80,14 +84,18 @@ export function PomodoroView({
   const boundTaskKeyRef = useRef<string | null>(
     selectedTask ? `${selectedTask.id}:${selectedTask.status}` : null,
   );
-  const lastTaskTitleRef = useRef<string | null>(selectedTask?.title ?? null);
+  const taskByIdMap = useMemo(() => taskById(tasks), [tasks]);
+  const selectedTaskTitle = selectedTask
+    ? formatTaskLineage(selectedTask, taskByIdMap)
+    : null;
+  const lastTaskTitleRef = useRef<string | null>(selectedTaskTitle);
 
   phaseRef.current = phase;
   statusRef.current = status;
   remainingRef.current = remaining;
   selectedTaskRef.current = selectedTask;
   settingsRef.current = settings;
-  if (selectedTask) lastTaskTitleRef.current = selectedTask.title;
+  if (selectedTaskTitle) lastTaskTitleRef.current = selectedTaskTitle;
 
   useEffect(() => {
     onTimingChange?.(status === "running" || status === "paused");
@@ -208,6 +216,15 @@ export function PomodoroView({
     finishingRef.current = true;
     setStatus("idle");
     const current = phaseRef.current;
+    if (completed) {
+      const endedBreak = isBreakPhase(current);
+      void playPomodoroEndChime(
+        endedBreak ? "break" : "focus",
+        endedBreak
+          ? settingsRef.current.breakEndSound
+          : settingsRef.current.focusEndSound,
+      );
+    }
     await persistSession(completed);
     startedAtRef.current = null;
     sessionTaskIdRef.current = null;
@@ -389,7 +406,7 @@ export function PomodoroView({
           <div className="pomodoro-task">
             <span className="chip-label">专注于</span>
             <strong>
-              {selectedTask?.title ?? lastTaskTitleRef.current ?? "任务已删除"}
+              {selectedTaskTitle ?? lastTaskTitleRef.current ?? "任务已删除"}
             </strong>
             {selectedTask ? (
               <span className="focus-count">今日专注 {todayCount} 次</span>

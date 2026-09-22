@@ -5,8 +5,12 @@ use crate::system_config::{
 };
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::Mutex as SyncGate;
 use tauri::{AppHandle, State};
+
+/// Only one sync runs at a time. A second request returns immediately.
+static SYNC_GATE: SyncGate<()> = SyncGate::new(());
 
 fn checkpoint_db(conn: &rusqlite::Connection) -> Result<(), String> {
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
@@ -28,6 +32,12 @@ fn run_git(cwd: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(cwd)
+        .stdin(Stdio::null())
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "/usr/bin/false")
+        .env("GCM_INTERACTIVE", "Never")
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+        .env("GIT_EDITOR", "true")
         .output()
         .map_err(|e| format!("无法执行 git（请确认已安装）: {e}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -184,30 +194,40 @@ pub fn set_data_directory(
 }
 
 #[tauri::command]
-pub fn run_data_sync(app: AppHandle, db: State<'_, DbState>) -> Result<(), String> {
+pub async fn run_data_sync(app: AppHandle, db: State<'_, DbState>) -> Result<(), String> {
     let settings = read_system_settings(&app)?;
     if !settings.sync_enabled {
         return Ok(());
     }
 
-    let result = (|| -> Result<(), String> {
+    let method = settings.sync_method;
+    let message = settings.git_commit_message.clone();
+    let backup = settings.local_backup_dir.clone();
+    let db_path = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         let db_path = db.db_path.lock().map_err(|e| e.to_string())?;
         checkpoint_db(&conn)?;
-        match settings.sync_method {
+        db_path.clone()
+    };
+
+    let app_for_sync = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let Ok(_gate) = SYNC_GATE.try_lock() else {
+            return Ok(());
+        };
+        match method {
             SyncMethod::Local => {
-                let backup = settings
-                    .local_backup_dir
-                    .as_deref()
-                    .unwrap_or("");
+                let backup = backup.as_deref().unwrap_or("");
                 sync_local(&db_path, backup)
             }
             SyncMethod::Git => {
-                let data_dir = resolve_active_data_dir(&app)?;
-                sync_git(&data_dir, &settings.git_commit_message)
+                let data_dir = resolve_active_data_dir(&app_for_sync)?;
+                sync_git(&data_dir, &message)
             }
         }
-    })();
+    })
+    .await
+    .map_err(|e| format!("同步任务失败: {e}"))?;
 
     if let Err(err) = result {
         let _ = disable_sync(&app);

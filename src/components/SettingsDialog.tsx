@@ -17,6 +17,12 @@ import {
   SystemSettings,
   WeekStartsOn,
 } from "../lib/api";
+import {
+  SILENT_SOUND,
+  forgetCachedSound,
+  isSilentSound,
+  playPomodoroEndChime,
+} from "../lib/pomodoroChime";
 import { ToggleSwitch } from "./ToggleSwitch";
 
 type SettingsSection = "pomodoro" | "calendar" | "system";
@@ -78,7 +84,7 @@ export function SettingsDialog({
     ])
       .then(([pomodoro, systemSettings, activeDir, defaultDir]) => {
         if (cancelled) return;
-        setSettings(pomodoro);
+        setSettings({ ...DEFAULT_POMODORO_SETTINGS, ...pomodoro });
         setSystem(systemSettings);
         setActiveDataDir(activeDir);
         setDefaultDataDir(defaultDir);
@@ -97,7 +103,10 @@ export function SettingsDialog({
     setBusy(true);
     setError(null);
     try {
-      const saved = await setPomodoroSettings(next);
+      const saved = {
+        ...DEFAULT_POMODORO_SETTINGS,
+        ...(await setPomodoroSettings(next)),
+      };
       setSettings(saved);
       onPomodoroSettingsChange(saved);
     } catch (err) {
@@ -169,6 +178,50 @@ export function SettingsDialog({
     } finally {
       setBusy(false);
     }
+  }
+
+  function soundFileName(path: string | null): string {
+    if (!path) return "默认提示音";
+    if (isSilentSound(path)) return "无提示音";
+    const name = path.split(/[/\\]/).pop();
+    return name || path;
+  }
+
+  async function chooseSound(key: "focusEndSound" | "breakEndSound") {
+    try {
+      const selected = await openDialog({
+        multiple: false,
+        title: "选择提示音",
+        filters: [{ name: "音频", extensions: ["mp3", "wav"] }],
+      });
+      if (selected == null || Array.isArray(selected)) return;
+      forgetCachedSound(settings[key]);
+      patchPomodoro({ [key]: selected } as Partial<PomodoroSettings>);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  async function previewSound(kind: "focus" | "break") {
+    const path =
+      kind === "focus" ? settings.focusEndSound : settings.breakEndSound;
+    if (isSilentSound(path)) return;
+    setError(null);
+    try {
+      await playPomodoroEndChime(kind, path, { fallbackToDefault: false });
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  function resetSound(key: "focusEndSound" | "breakEndSound") {
+    forgetCachedSound(settings[key]);
+    patchPomodoro({ [key]: null } as Partial<PomodoroSettings>);
+  }
+
+  function muteSound(key: "focusEndSound" | "breakEndSound") {
+    forgetCachedSound(settings[key]);
+    patchPomodoro({ [key]: SILENT_SOUND } as Partial<PomodoroSettings>);
   }
 
   async function chooseBackupDir() {
@@ -416,6 +469,88 @@ export function SettingsDialog({
                       patchPomodoro({ autoStartBreak: checked })
                     }
                   />
+                </div>
+
+                <div className="settings-row settings-row-stack">
+                  <span className="settings-row-label">专注结束提示音</span>
+                  <div className="settings-path-block">
+                    <code className="settings-path-value">
+                      {soundFileName(settings.focusEndSound)}
+                    </code>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy || isSilentSound(settings.focusEndSound)}
+                      onClick={() => void previewSound("focus")}
+                    >
+                      试听
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy}
+                      onClick={() => void chooseSound("focusEndSound")}
+                    >
+                      选择
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy || settings.focusEndSound == null}
+                      onClick={() => resetSound("focusEndSound")}
+                    >
+                      默认
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy || isSilentSound(settings.focusEndSound)}
+                      onClick={() => muteSound("focusEndSound")}
+                    >
+                      无
+                    </button>
+                  </div>
+                </div>
+
+                <div className="settings-row settings-row-stack">
+                  <span className="settings-row-label">休息结束提示音</span>
+                  <div className="settings-path-block">
+                    <code className="settings-path-value">
+                      {soundFileName(settings.breakEndSound)}
+                    </code>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy || isSilentSound(settings.breakEndSound)}
+                      onClick={() => void previewSound("break")}
+                    >
+                      试听
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy}
+                      onClick={() => void chooseSound("breakEndSound")}
+                    >
+                      选择
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy || settings.breakEndSound == null}
+                      onClick={() => resetSound("breakEndSound")}
+                    >
+                      默认
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy || isSilentSound(settings.breakEndSound)}
+                      onClick={() => muteSound("breakEndSound")}
+                    >
+                      无
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

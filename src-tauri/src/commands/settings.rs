@@ -1,8 +1,11 @@
 use crate::db::DbState;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
 use tauri::State;
 
 const POMODORO_SETTINGS_KEY: &str = "pomodoro";
+const MAX_SOUND_BYTES: u64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +18,10 @@ pub struct PomodoroSettings {
     pub long_break_interval: i64,
     pub auto_start_focus: bool,
     pub auto_start_break: bool,
+    #[serde(default)]
+    pub focus_end_sound: Option<String>,
+    #[serde(default)]
+    pub break_end_sound: Option<String>,
 }
 
 impl Default for PomodoroSettings {
@@ -28,6 +35,8 @@ impl Default for PomodoroSettings {
             long_break_interval: 4,
             auto_start_focus: false,
             auto_start_break: false,
+            focus_end_sound: None,
+            break_end_sound: None,
         }
     }
 }
@@ -46,6 +55,16 @@ fn clamp_interval(value: i64) -> i64 {
     value.min(99)
 }
 
+fn normalize_sound_path(value: Option<String>) -> Option<String> {
+    let trimmed = value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())?;
+    if trimmed.eq_ignore_ascii_case("none") {
+        return Some("none".into());
+    }
+    Some(trimmed)
+}
+
 fn normalize(settings: PomodoroSettings) -> PomodoroSettings {
     PomodoroSettings {
         focus_minutes: clamp_minutes(settings.focus_minutes, 25),
@@ -56,7 +75,30 @@ fn normalize(settings: PomodoroSettings) -> PomodoroSettings {
         long_break_interval: clamp_interval(settings.long_break_interval),
         auto_start_focus: settings.auto_start_focus,
         auto_start_break: settings.auto_start_break,
+        focus_end_sound: normalize_sound_path(settings.focus_end_sound),
+        break_end_sound: normalize_sound_path(settings.break_end_sound),
     }
+}
+
+#[tauri::command]
+pub fn read_sound_file(path: String) -> Result<Vec<u8>, String> {
+    let file = PathBuf::from(path.trim());
+    let ext = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext != "wav" && ext != "mp3" {
+        return Err("仅支持 mp3 或 wav 文件".into());
+    }
+    let meta = fs::metadata(&file).map_err(|e| format!("无法读取音频: {e}"))?;
+    if !meta.is_file() {
+        return Err("路径不是文件".into());
+    }
+    if meta.len() > MAX_SOUND_BYTES {
+        return Err("音频文件不能超过 5MB".into());
+    }
+    fs::read(&file).map_err(|e| format!("无法读取音频: {e}"))
 }
 
 fn read_pomodoro_settings(conn: &rusqlite::Connection) -> Result<PomodoroSettings, String> {

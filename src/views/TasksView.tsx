@@ -13,7 +13,9 @@ import {
   ClockEstimatePicker,
   TaskPomodoroClocks,
 } from "../components/ClockEstimate";
-import { TaskDetailDialog } from "../components/TaskDetailDialog";
+import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
+import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
+import { TaskRowMenu } from "../components/TaskRowMenu";
 import {
   Category,
   createCategory,
@@ -36,6 +38,17 @@ import {
   splitDurationMinutes,
 } from "../lib/dateDisplay";
 import { isTaskStarted } from "../lib/taskSchedule";
+import {
+  applyAncestorFields,
+  childIdSet,
+  flattenTaskTree,
+  removeTaskTree,
+  taskById,
+  withAncestors,
+  type TaskNode,
+} from "../lib/taskTree";
+
+const EXPAND_STORAGE_KEY = "abyss-gazer.expanded-tasks";
 
 const POMODORO_MINUTES = 25;
 
@@ -87,6 +100,7 @@ interface DragState {
 
 interface DropTarget {
   priority: TaskPriority;
+  parentId: string | null;
   beforeId: string | null;
 }
 
@@ -95,40 +109,131 @@ function normalizePriority(value: string | undefined): TaskPriority | null {
   return null;
 }
 
+function siblingTasks(
+  tasks: Task[],
+  parentId: string | null,
+  priority?: TaskPriority,
+): Task[] {
+  return tasks
+    .filter((task) => {
+      if ((task.parent_id ?? null) !== parentId) return false;
+      if (parentId == null && priority) return task.priority === priority;
+      return true;
+    })
+    .sort((a, b) => a.sort_order - b.sort_order || a.created_at - b.created_at);
+}
+
+function owningSibling(
+  hoveredId: string,
+  parentId: string | null,
+  byId: Map<string, Task>,
+): Task | null {
+  let current = byId.get(hoveredId);
+  while (current) {
+    if ((current.parent_id ?? null) === parentId) return current;
+    if (!current.parent_id) return null;
+    current = byId.get(current.parent_id);
+  }
+  return null;
+}
+
+function belongsToParent(
+  task: Task,
+  parentId: string,
+  byId: Map<string, Task>,
+): boolean {
+  let current: Task | undefined = task;
+  while (current) {
+    if (current.parent_id === parentId) return true;
+    if (!current.parent_id) return false;
+    current = byId.get(current.parent_id);
+  }
+  return false;
+}
+
 function dropTargetFromPoint(
   x: number,
   y: number,
-  draggingId: string,
+  dragging: Task,
+  tasks: Task[],
 ): DropTarget | null {
+  const byId = taskById(tasks);
   const el = document.elementFromPoint(x, y);
   const group = el?.closest("[data-priority]") as HTMLElement | null;
   const priority = normalizePriority(group?.dataset.priority);
   if (!priority || !group) return null;
 
+  if (dragging.parent_id) {
+    const parent = byId.get(dragging.parent_id);
+    if (!parent) return null;
+    const parentPriority = normalizePriority(parent.priority) ?? "medium";
+    if (priority !== parentPriority) return null;
+
+    const siblings = siblingTasks(tasks, dragging.parent_id);
+    const firstOther = siblings.find((task) => task.id !== dragging.id);
+    const row = el?.closest("[data-task-id]") as HTMLElement | null;
+    if (!row || !group.contains(row)) {
+      return { priority, parentId: dragging.parent_id, beforeId: null };
+    }
+    const rowId = row.dataset.taskId;
+    if (!rowId || rowId === dragging.id) {
+      return { priority, parentId: dragging.parent_id, beforeId: null };
+    }
+    if (rowId === dragging.parent_id) {
+      return {
+        priority,
+        parentId: dragging.parent_id,
+        beforeId: firstOther?.id ?? null,
+      };
+    }
+    const sibling = owningSibling(rowId, dragging.parent_id, byId);
+    if (!sibling || sibling.id === dragging.id) {
+      return { priority, parentId: dragging.parent_id, beforeId: null };
+    }
+    const siblingEl =
+      (group.querySelector(
+        `[data-task-id="${sibling.id}"]`,
+      ) as HTMLElement | null) ?? row;
+    const insertBefore = y < siblingEl.getBoundingClientRect().top + siblingEl.getBoundingClientRect().height / 2;
+    if (insertBefore) {
+      return { priority, parentId: dragging.parent_id, beforeId: sibling.id };
+    }
+    const idx = siblings.findIndex((task) => task.id === sibling.id);
+    const next = siblings.slice(idx + 1).find((task) => task.id !== dragging.id);
+    return { priority, parentId: dragging.parent_id, beforeId: next?.id ?? null };
+  }
+
   const row = el?.closest("[data-task-id]") as HTMLElement | null;
   if (!row || !group.contains(row)) {
-    return { priority, beforeId: null };
+    return { priority, parentId: null, beforeId: null };
   }
-
   const rowId = row.dataset.taskId;
-  if (!rowId || rowId === draggingId) {
-    return { priority, beforeId: null };
+  if (!rowId || rowId === dragging.id) {
+    return { priority, parentId: null, beforeId: null };
   }
-
-  const rect = row.getBoundingClientRect();
+  const hovered = byId.get(rowId);
+  if (!hovered) return { priority, parentId: null, beforeId: null };
+  let root = hovered;
+  while (root.parent_id) {
+    const parent = byId.get(root.parent_id);
+    if (!parent) break;
+    root = parent;
+  }
+  if (root.id === dragging.id) {
+    return { priority, parentId: null, beforeId: null };
+  }
+  const rootEl =
+    (group.querySelector(`[data-task-id="${root.id}"]`) as HTMLElement | null) ??
+    row;
+  const rect = rootEl.getBoundingClientRect();
   const insertBefore = y < rect.top + rect.height / 2;
   if (insertBefore) {
-    return { priority, beforeId: rowId };
+    return { priority, parentId: null, beforeId: root.id };
   }
-
-  let next = row.nextElementSibling as HTMLElement | null;
-  while (next && next.dataset.taskId === draggingId) {
-    next = next.nextElementSibling as HTMLElement | null;
-  }
-  return {
-    priority,
-    beforeId: next?.dataset.taskId ?? null,
-  };
+  const roots = siblingTasks(tasks, null, priority);
+  const idx = roots.findIndex((task) => task.id === root.id);
+  const next = roots.slice(idx + 1).find((task) => task.id !== dragging.id);
+  return { priority, parentId: null, beforeId: next?.id ?? null };
 }
 
 export function TasksView({
@@ -143,10 +248,6 @@ export function TasksView({
   const [draft, setDraft] = useState("");
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
   const [draftEstimate, setDraftEstimate] = useState(0);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editCategoryId, setEditCategoryId] = useState<string | null>(null);
-  const [editEstimate, setEditEstimate] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -154,13 +255,31 @@ export function TasksView({
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
-  const [createFor, setCreateFor] = useState<"draft" | "edit" | null>(null);
+  const [createFor, setCreateFor] = useState<"draft" | "detail" | null>(null);
+  const [pickedCategory, setPickedCategory] = useState<{
+    id: string;
+    token: number;
+  } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{
+    task: Task;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [subtaskParent, setSubtaskParent] = useState<Task | null>(null);
   const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [todayFocusByTask, setTodayFocusByTask] = useState<Map<string, number>>(
     () => new Map(),
   );
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+    try {
+      const raw = sessionStorage.getItem(EXPAND_STORAGE_KEY);
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
 
   const dragRef = useRef<DragState | null>(null);
   const tasksRef = useRef(tasks);
@@ -201,6 +320,10 @@ export function TasksView({
       cancelled = true;
     };
   }, [tasks]);
+
+  useEffect(() => {
+    sessionStorage.setItem(EXPAND_STORAGE_KEY, JSON.stringify([...expandedIds]));
+  }, [expandedIds]);
 
   const categoryMap = useMemo(() => {
     const map = new Map<string, Category>();
@@ -262,19 +385,36 @@ export function TasksView({
     };
   }, [filteredTasks, todayFocusByTask]);
 
+  const boardTasks = useMemo(
+    () =>
+      withAncestors(
+        filteredTasks.filter((task) => task.status !== "done"),
+        tasks,
+      ),
+    [filteredTasks, tasks],
+  );
+
+  const collapsedIds = useMemo(() => {
+    const ids = childIdSet(boardTasks);
+    for (const id of expandedIds) ids.delete(id);
+    return ids;
+  }, [boardTasks, expandedIds]);
+
   const grouped = useMemo(() => {
-    const map: Record<TaskPriority, Task[]> = {
+    const map: Record<TaskPriority, TaskNode[]> = {
       high: [],
       medium: [],
       low: [],
     };
-    for (const task of filteredTasks) {
-      if (task.status === "done") continue;
-      const key = normalizePriority(task.priority) ?? "medium";
-      map[key].push(task);
+    const roots = boardTasks.filter((task) => !task.parent_id);
+    for (const group of PRIORITY_GROUPS) {
+      const groupRoots = roots.filter(
+        (task) => (normalizePriority(task.priority) ?? "medium") === group.id,
+      );
+      map[group.id] = flattenTaskTree(boardTasks, collapsedIds, groupRoots);
     }
     return map;
-  }, [filteredTasks]);
+  }, [boardTasks, collapsedIds]);
 
   const draggingTask = drag
     ? tasks.find((t) => t.id === drag.taskId) ?? null
@@ -295,26 +435,35 @@ export function TasksView({
       const updated = { ...next, x: e.clientX, y: e.clientY };
       dragRef.current = updated;
       setDrag(updated);
-      setDropTarget(dropTargetFromPoint(e.clientX, e.clientY, next.taskId));
+      const moving = tasksRef.current.find((t) => t.id === next.taskId);
+      setDropTarget(
+        moving
+          ? dropTargetFromPoint(e.clientX, e.clientY, moving, tasksRef.current)
+          : null,
+      );
     }
 
     function onUp(e: PointerEvent) {
       const current = dragRef.current;
       dragRef.current = null;
       setDrag(null);
-      const target = current
-        ? dropTargetFromPoint(e.clientX, e.clientY, current.taskId)
+      const moving = current
+        ? tasksRef.current.find((t) => t.id === current.taskId)
         : null;
+      const target =
+        current && moving
+          ? dropTargetFromPoint(e.clientX, e.clientY, moving, tasksRef.current)
+          : null;
       setDropTarget(null);
       document.body.classList.remove("is-task-dragging");
-      if (!current || !target) return;
+      if (!current || !moving || !target) return;
+      if ((moving.parent_id ?? null) !== target.parentId) return;
 
-      const existing = tasksRef.current.find((t) => t.id === current.taskId);
-      if (!existing) return;
-
-      const sameGroup = tasksRef.current
-        .filter((t) => t.priority === target.priority)
-        .map((t) => t.id);
+      const sameGroup = siblingTasks(
+        tasksRef.current,
+        target.parentId,
+        target.parentId == null ? target.priority : undefined,
+      ).map((task) => task.id);
       const without = sameGroup.filter((id) => id !== current.taskId);
       const insertAt =
         target.beforeId == null
@@ -325,7 +474,7 @@ export function TasksView({
       const nextOrder = [...without];
       nextOrder.splice(insertAt, 0, current.taskId);
       const unchanged =
-        existing.priority === target.priority &&
+        (moving.parent_id != null || moving.priority === target.priority) &&
         nextOrder.length === sameGroup.length &&
         nextOrder.every((id, i) => id === sameGroup[i]);
       if (unchanged) return;
@@ -392,27 +541,6 @@ export function TasksView({
     }
   }
 
-  async function saveEdit(id: string) {
-    const title = editTitle.trim();
-    if (!title) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await updateTask({
-        id,
-        title,
-        category_id: editCategoryId,
-        estimate_pomodoros: editEstimate,
-      });
-      onTasksChange(tasks.map((t) => (t.id === next.id ? next : t)));
-      setEditingId(null);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function confirmRemove() {
     const task = pendingDeleteTask;
     if (!task || busy) return;
@@ -420,8 +548,11 @@ export function TasksView({
     setError(null);
     try {
       await deleteTask(task.id);
-      onTasksChange(tasks.filter((t) => t.id !== task.id));
-      if (selectedTaskId === task.id) onSelectTask(null);
+      const next = removeTaskTree(tasks, task.id);
+      onTasksChange(next);
+      if (selectedTaskId && !next.some((row) => row.id === selectedTaskId)) {
+        onSelectTask(null);
+      }
       setPendingDeleteTask(null);
     } catch (err) {
       setError(String(err));
@@ -430,19 +561,37 @@ export function TasksView({
     }
   }
 
-  async function saveTaskDetail(input: {
-    notes: string;
-    due_at: number | null;
-    start_at: number | null;
-  }) {
+  async function handleCreateSubtask(parent: Task, title: string) {
+    const task = await createTask({
+      title,
+      parent_id: parent.id,
+    });
+    onTasksChange([task, ...tasks]);
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      let current: Task | undefined = parent;
+      const byId = taskById(tasks);
+      while (current) {
+        next.add(current.id);
+        current = current.parent_id ? byId.get(current.parent_id) : undefined;
+      }
+      return next;
+    });
+    onSelectTask(task.id);
+  }
+
+  async function saveTaskDetail(input: TaskDetailSave) {
     if (!detailTask) return;
     const next = await updateTask({
       id: detailTask.id,
+      title: input.title,
+      ...(detailTask.parent_id ? {} : { category_id: input.category_id }),
+      estimate_pomodoros: input.estimate_pomodoros,
       notes: input.notes,
       due_at: input.due_at,
       start_at: input.start_at,
     });
-    onTasksChange(tasks.map((t) => (t.id === next.id ? next : t)));
+    onTasksChange(applyAncestorFields(tasks, next));
     setDetailTask(next);
   }
 
@@ -461,7 +610,12 @@ export function TasksView({
     const category = await createCategory(name, color);
     setCategories((prev) => [...prev, category]);
     if (createFor === "draft") setDraftCategoryId(category.id);
-    if (createFor === "edit") setEditCategoryId(category.id);
+    if (createFor === "detail") {
+      setPickedCategory((prev) => ({
+        id: category.id,
+        token: (prev?.token ?? 0) + 1,
+      }));
+    }
   }
 
   async function handleDeleteCategory(id: string) {
@@ -473,11 +627,10 @@ export function TasksView({
       ),
     );
     if (draftCategoryId === id) setDraftCategoryId(null);
-    if (editCategoryId === id) setEditCategoryId(null);
     if (categoryFilter === id) onCategoryFilterChange("all");
   }
 
-  function openCreateCategory(target: "draft" | "edit") {
+  function openCreateCategory(target: "draft" | "detail") {
     setEditingCategory(null);
     setCreateFor(target);
     setCategoryDialogOpen(true);
@@ -493,13 +646,6 @@ export function TasksView({
     setCategoryDialogOpen(false);
     setEditingCategory(null);
     setCreateFor(null);
-  }
-
-  function beginEdit(task: Task) {
-    setEditingId(task.id);
-    setEditTitle(task.title);
-    setEditCategoryId(task.category_id);
-    setEditEstimate(task.estimate_pomodoros ?? 0);
   }
 
   function beginDrag(
@@ -520,6 +666,7 @@ export function TasksView({
     setDrag(next);
     setDropTarget({
       priority: normalizePriority(task.priority) ?? "medium",
+      parentId: task.parent_id,
       beforeId: null,
     });
   }
@@ -528,11 +675,11 @@ export function TasksView({
     e: ReactPointerEvent<HTMLLIElement>,
     task: Task,
   ) {
-    if (e.button !== 0 || busy || editingId === task.id) return;
+    if (e.button !== 0 || busy) return;
     const target = e.target as HTMLElement;
     if (
       target.closest(
-        ".task-check, .task-play, .task-actions, .category-picker, .clock-estimate-picker, input, textarea",
+        ".task-check, .task-play, .task-toggle, .task-actions, .category-picker, .clock-estimate-picker, input, textarea",
       )
     ) {
       return;
@@ -581,11 +728,10 @@ export function TasksView({
     e: ReactMouseEvent<HTMLLIElement>,
     task: Task,
   ) {
-    if (editingId === task.id) return;
     const target = e.target as HTMLElement;
     if (
       target.closest(
-        ".task-check, .task-play, .task-actions, .category-picker, .clock-estimate-picker, input, textarea",
+        ".task-check, .task-play, .task-toggle, .task-actions, .category-picker, .clock-estimate-picker, input, textarea",
       )
     ) {
       return;
@@ -593,10 +739,45 @@ export function TasksView({
     onSelectTask(task.id);
   }
 
-  function renderGroup(priority: TaskPriority, label: string, items: Task[]) {
-    const isGroupTarget = dropTarget?.priority === priority && !!drag;
+  function toggleCollapsed(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function expandAllSubtasks() {
+    setExpandedIds(new Set(childIdSet(tasks)));
+  }
+
+  function collapseAllSubtasks() {
+    setExpandedIds(new Set());
+  }
+
+  function renderGroup(priority: TaskPriority, label: string, items: TaskNode[]) {
+    const draggingChild = !!draggingTask?.parent_id;
+    const isGroupTarget =
+      !!drag &&
+      dropTarget?.priority === priority &&
+      (draggingChild ? dropTarget.parentId != null : dropTarget.parentId == null);
+    const byId = taskById(tasks);
+    const lastChildDropId =
+      draggingTask?.parent_id &&
+      dropTarget?.parentId === draggingTask.parent_id &&
+      dropTarget.beforeId == null
+        ? [...items]
+            .reverse()
+            .find((node) =>
+              belongsToParent(node.task, draggingTask.parent_id!, byId),
+            )?.task.id ?? null
+        : null;
     const showEndIndicator =
-      isGroupTarget && dropTarget?.beforeId == null && items.length > 0;
+      isGroupTarget &&
+      !draggingChild &&
+      dropTarget?.beforeId == null &&
+      items.length > 0;
 
     return (
       <section
@@ -613,47 +794,79 @@ export function TasksView({
           {items.length === 0 ? (
             <li className="task-drop-hint">拖到此处</li>
           ) : (
-            items.map((task) => {
+            items.map(({ task, depth, hasChildren }) => {
               const selected = task.id === selectedTaskId;
-              const editing = editingId === task.id;
               const isDragging = drag?.taskId === task.id;
               const showBefore =
                 isGroupTarget &&
                 dropTarget?.beforeId === task.id &&
                 drag?.taskId !== task.id;
+              const showAfter = lastChildDropId === task.id && !showBefore;
               const category = task.category_id
                 ? categoryMap.get(task.category_id)
                 : null;
+              const isSubtask = !!task.parent_id;
+              const collapsed = collapsedIds.has(task.id);
               return (
                 <li
                   key={task.id}
                   data-task-id={task.id}
+                  data-parent-id={task.parent_id ?? ""}
+                  data-depth={depth}
                   className={`task-row${selected ? " is-selected" : ""}${
                     task.status === "done" ? " is-done" : ""
                   }${isDragging ? " is-dragging" : ""}${
                     showBefore ? " drop-before" : ""
+                  }${showAfter ? " drop-after" : ""}${
+                    isSubtask ? " is-child" : ""
                   }`}
+                  style={{ ["--task-depth" as string]: String(depth) }}
                   onPointerDown={(e) => armRowPointer(e, task)}
                   onClick={(e) => onRowClick(e, task)}
                   onDoubleClick={(e) => {
-                    if (editing) return;
                     const target = e.target as HTMLElement;
                     if (
                       target.closest(
-                        ".task-check, .task-play, .task-actions, .category-picker, .clock-estimate-picker, input, textarea",
+                        ".task-check, .task-play, .task-toggle, .task-actions, .category-picker, .clock-estimate-picker, input, textarea",
                       )
                     ) {
                       return;
                     }
-                    beginEdit(task);
+                    setDetailTask(task);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setRowMenu({ task, x: e.clientX, y: e.clientY });
                   }}
                 >
+                  {hasChildren ? (
+                    <button
+                      type="button"
+                      className={`task-toggle${collapsed ? " is-collapsed" : ""}`}
+                      title={collapsed ? "展开子任务" : "折叠子任务"}
+                      aria-label={collapsed ? "展开子任务" : "折叠子任务"}
+                      aria-expanded={!collapsed}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleCollapsed(task.id);
+                      }}
+                    >
+                      {collapsed ? "▶" : "▼"}
+                    </button>
+                  ) : (
+                    <span className="task-toggle-spacer" aria-hidden />
+                  )}
                   <button
                     type="button"
                     className="drag-handle"
-                    title="按住拖动调整优先级或排序"
+                    title={
+                      isSubtask
+                        ? "按住拖动调整子任务排序"
+                        : "按住拖动调整优先级或排序"
+                    }
                     aria-label={`拖动「${task.title}」调整位置`}
-                    disabled={busy || editing}
+                    disabled={busy}
                   >
                     ⋮⋮
                   </button>
@@ -679,80 +892,24 @@ export function TasksView({
                   >
                     ▶
                   </button>
-                  {editing ? (
-                    <div className="task-edit-fields">
-                      <input
-                        className="task-edit-input"
-                        value={editTitle}
-                        autoFocus
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") void saveEdit(task.id);
-                          if (e.key === "Escape") setEditingId(null);
-                        }}
-                      />
-                      <CategoryPicker
-                        categories={categories}
-                        value={editCategoryId}
-                        compact
-                        disabled={busy}
-                        onChange={setEditCategoryId}
-                        onRequestCreate={() => openCreateCategory("edit")}
-                        onRequestEdit={openEditCategory}
-                      />
-                      <ClockEstimatePicker
-                        value={editEstimate}
-                        onChange={setEditEstimate}
-                        disabled={busy}
-                      />
-                    </div>
-                  ) : (
-                    <div className="task-main">
-                      <span className="task-title-btn">{task.title}</span>
-                      {category && (
-                        <span className="task-category-tag">
-                          <span
-                            className="category-swatch"
-                            style={{ background: category.color }}
-                            aria-hidden
-                          />
-                          {category.name}
-                        </span>
-                      )}
-                      <TaskPomodoroClocks
-                        estimate={task.estimate_pomodoros ?? 0}
-                        completed={task.completed_pomodoros ?? 0}
-                      />
-                    </div>
-                  )}
-                  <div className="task-actions">
-                    {editing ? (
-                      <>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={() => void saveEdit(task.id)}
-                          disabled={busy}
-                        >
-                          保存
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={() => setEditingId(null)}
-                        >
-                          取消
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className="ghost-btn"
-                        onClick={() => beginEdit(task)}
-                      >
-                        编辑
-                      </button>
+                  <div className="task-main">
+                    <span className="task-title-btn">{task.title}</span>
+                    {category && (
+                      <span className="task-category-tag">
+                        <span
+                          className="category-swatch"
+                          style={{ background: category.color }}
+                          aria-hidden
+                        />
+                        {category.name}
+                      </span>
                     )}
+                    <TaskPomodoroClocks
+                      estimate={task.estimate_pomodoros ?? 0}
+                      completed={task.completed_pomodoros ?? 0}
+                    />
+                  </div>
+                  <div className="task-actions">
                     <button
                       type="button"
                       className="ghost-btn"
@@ -762,7 +919,7 @@ export function TasksView({
                       }}
                       disabled={busy}
                     >
-                      更多
+                      编辑
                     </button>
                     <button
                       type="button"
@@ -850,6 +1007,7 @@ export function TasksView({
         </button>
       </form>
 
+      <div className="task-list-toolbar">
       <div className="category-filter" role="toolbar" aria-label="按分类筛选">
         <button
           type="button"
@@ -882,6 +1040,45 @@ export function TasksView({
             {c.name}
           </button>
         ))}
+      </div>
+      <div className="task-tree-actions">
+        <button
+          type="button"
+          className="secondary-btn task-tree-btn"
+          onClick={expandAllSubtasks}
+          title="展开所有子任务"
+          aria-label="展开所有子任务"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
+            <path
+              d="M3.2 4.2 8 8.4l4.8-4.2M3.2 8.2 8 12.4l4.8-4.2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="secondary-btn task-tree-btn"
+          onClick={collapseAllSubtasks}
+          title="收起所有子任务"
+          aria-label="收起所有子任务"
+        >
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
+            <path
+              d="M3.2 7.8 8 3.6l4.8 4.2M3.2 11.8 8 7.6l4.8 4.2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
       </div>
 
       {error && <p className="error-banner">{error}</p>}
@@ -925,9 +1122,47 @@ export function TasksView({
       <TaskDetailDialog
         open={!!detailTask}
         task={detailTask}
+        categories={categories}
         onClose={() => setDetailTask(null)}
         onSave={saveTaskDetail}
+        onCreateSubtask={
+          detailTask
+            ? (title) => handleCreateSubtask(detailTask, title)
+            : undefined
+        }
+        onRequestCreateCategory={() => openCreateCategory("detail")}
+        onRequestEditCategory={openEditCategory}
+        pickedCategory={pickedCategory}
       />
+
+      <CreateSubtaskDialog
+        open={!!subtaskParent}
+        onClose={() => setSubtaskParent(null)}
+        onCreate={async (title) => {
+          if (!subtaskParent) return;
+          await handleCreateSubtask(subtaskParent, title);
+        }}
+      />
+
+      {rowMenu && (
+        <TaskRowMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          onClose={() => setRowMenu(null)}
+          onEdit={() => {
+            setDetailTask(rowMenu.task);
+            setRowMenu(null);
+          }}
+          onCreateSubtask={() => {
+            setSubtaskParent(rowMenu.task);
+            setRowMenu(null);
+          }}
+          onDelete={() => {
+            setPendingDeleteTask(rowMenu.task);
+            setRowMenu(null);
+          }}
+        />
+      )}
 
       {pendingDeleteTask && (
         <div
@@ -944,7 +1179,13 @@ export function TasksView({
           >
             <h2 id="delete-task-title">删除任务</h2>
             <div className="delete-confirm">
-              <p>确定删除任务「{pendingDeleteTask.title}」？此操作不可撤销。</p>
+              <p>
+                确定删除任务「{pendingDeleteTask.title}」
+                {tasks.some((task) => task.parent_id === pendingDeleteTask.id)
+                  ? "及其所有子任务"
+                  : ""}
+                ？此操作不可撤销。
+              </p>
               <div className="delete-confirm-actions">
                 <button
                   type="button"

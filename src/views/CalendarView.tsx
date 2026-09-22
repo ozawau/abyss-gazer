@@ -18,6 +18,7 @@ import {
   categoryColor,
   clipSessionToDay,
   completedTasksOnDay,
+  completedFocusCountOnDay,
   countDayActivity,
   dayKey,
   focusSessionsOnDay,
@@ -40,6 +41,8 @@ import {
   statutoryDayInfo,
   statutoryDayTitle,
 } from "../lib/cnStatutoryDay";
+import { formatLunarDayShort } from "../lib/dateDisplay";
+import { formatTaskLineage, leafTasks } from "../lib/taskTree";
 
 interface CalendarViewProps {
   tasks: Task[];
@@ -127,7 +130,9 @@ export function CalendarView({
   }, [categories]);
 
   const filteredTasks = useMemo(() => {
+    const leaves = new Set(leafTasks(tasks).map((task) => task.id));
     return tasks.filter((t) => {
+      if (!leaves.has(t.id)) return false;
       if (hideDone && t.status === "done") return false;
       if (categoryFilter === "none") return !t.category_id;
       if (categoryFilter !== "all" && t.category_id !== categoryFilter) {
@@ -380,6 +385,7 @@ export function CalendarView({
                   tasks={selectedDayCompleted}
                   selectedDay={selectedDay}
                   selectedTaskId={selectedTaskId}
+                  taskMap={taskMap}
                   categoryMap={categoryMap}
                   onSelectTask={onSelectTask}
                   onStartPomodoro={onStartPomodoro}
@@ -392,6 +398,7 @@ export function CalendarView({
                   tasks={selectedDayScheduledOnly}
                   selectedDay={selectedDay}
                   selectedTaskId={selectedTaskId}
+                  taskMap={taskMap}
                   categoryMap={categoryMap}
                   onSelectTask={onSelectTask}
                   onStartPomodoro={onStartPomodoro}
@@ -612,7 +619,9 @@ function YearGrid({
                 const count = countDayActivity(tasks, sessions, day);
                 const statutory = statutoryDayInfo(day);
                 const weekend = day.getDay() === 0 || day.getDay() === 6;
+                const lunar = formatLunarDayShort(day);
                 const titleParts: string[] = [];
+                if (lunar) titleParts.push(`农历${lunar}`);
                 if (statutory) titleParts.push(statutoryDayTitle(statutory));
                 if (count > 0) titleParts.push(`${count} 项任务`);
                 return (
@@ -634,6 +643,9 @@ function YearGrid({
                     }
                   >
                     <span className="calendar-year-daynum">{day.getDate()}</span>
+                    {lunar && (
+                      <span className="calendar-year-lunar">{lunar}</span>
+                    )}
                     {statutory && (
                       <span
                         className={`calendar-year-statutory is-${statutory.mark}`}
@@ -706,18 +718,36 @@ function MonthGrid({
               ]
             : [];
           const daySessions = inMonth ? focusSessionsOnDay(sessions, day) : [];
+          const pomodoroCount = inMonth
+            ? completedFocusCountOnDay(sessions, day)
+            : 0;
           const statutory = statutoryDayInfo(day);
+          const lunar = formatLunarDayShort(day);
           const weekend = day.getDay() === 0 || day.getDay() === 6;
-          const events: Array<
-            | { type: "session"; session: PomodoroSession; task: Task }
-            | { type: "task"; task: Task }
-          > = [
-            ...daySessions.flatMap((session) => {
-              const task = taskMap.get(session.task_id);
-              return task ? [{ type: "session" as const, session, task }] : [];
-            }),
-            ...dayTasks.map((task) => ({ type: "task" as const, task })),
-          ];
+          const events = new Map<
+            string,
+            { task: Task; focus: boolean; done: boolean }
+          >();
+          for (const session of daySessions) {
+            const task = taskMap.get(session.task_id);
+            if (!task) continue;
+            const prev = events.get(task.id);
+            if (prev) prev.focus = true;
+            else {
+              events.set(task.id, {
+                task,
+                focus: true,
+                done: taskCompletedOnDay(task, day),
+              });
+            }
+          }
+          for (const task of dayTasks) {
+            const prev = events.get(task.id);
+            const done = taskCompletedOnDay(task, day);
+            if (prev) prev.done = prev.done || done;
+            else events.set(task.id, { task, focus: false, done });
+          }
+          const dayEvents = [...events.values()];
           return (
             <button
               key={dayKey(day)}
@@ -736,62 +766,69 @@ function MonthGrid({
               onClick={() => onSelectDay(day)}
             >
               <span className="calendar-month-dayhead">
-                <span className="calendar-month-daynum">{day.getDate()}</span>
-                {statutory && (
-                  <span
-                    className={`calendar-month-statutory is-${statutory.mark}`}
-                    aria-hidden
-                  >
-                    {statutory.mark === "holiday" ? "休" : "班"}
-                  </span>
-                )}
+                <span className="calendar-month-daynums">
+                  <span className="calendar-month-daynum">{day.getDate()}</span>
+                  {lunar && <span className="calendar-month-lunar">{lunar}</span>}
+                </span>
+                <span className="calendar-month-daymeta">
+                  {pomodoroCount > 0 && (
+                    <span
+                      className="calendar-month-pomos"
+                      title={`完成 ${pomodoroCount} 个番茄`}
+                    >
+                      {pomodoroCount}
+                    </span>
+                  )}
+                  {statutory && (
+                    <span
+                      className={`calendar-month-statutory is-${statutory.mark}`}
+                      aria-hidden
+                    >
+                      {statutory.mark === "holiday" ? "休" : "班"}
+                    </span>
+                  )}
+                </span>
               </span>
               <ul className="calendar-month-events">
-                {events.slice(0, 3).map((event) => {
+                {dayEvents.slice(0, 3).map((event) => {
                   const task = event.task;
                   const category = task.category_id
                     ? categoryMap.get(task.category_id)
                     : null;
-                  const marker =
-                    event.type === "session"
-                      ? "focus"
-                      : taskCompletedOnDay(task, day)
-                        ? "done"
-                        : taskMarkerKind(task, day);
+                  const tone =
+                    event.focus && event.done
+                      ? "is-both"
+                      : event.done
+                        ? "is-complete"
+                        : event.focus
+                          ? "is-focus"
+                          : "";
+                  const toneTitle =
+                    event.focus && event.done
+                      ? "已专注并完成"
+                      : event.done
+                        ? "已完成"
+                        : event.focus
+                          ? "已专注"
+                          : undefined;
                   return (
                     <li
-                      key={
-                        event.type === "session"
-                          ? event.session.id
-                          : `task-${task.id}`
-                      }
-                      className={`calendar-month-event${
-                        task.status === "done" ? " is-done" : ""
-                      }`}
+                      key={task.id}
+                      className={`calendar-month-event${tone ? ` ${tone}` : ""}`}
+                      title={toneTitle}
                       style={
                         category
                           ? { borderLeftColor: category.color }
                           : undefined
                       }
                     >
-                      <span className="calendar-event-marker">
-                        {marker === "focus"
-                          ? "专"
-                          : marker === "done"
-                            ? "完"
-                            : marker === "start"
-                              ? "始"
-                              : marker === "due"
-                                ? "止"
-                                : "·"}
-                      </span>
                       {task.title}
                     </li>
                   );
                 })}
-                {events.length > 3 && (
+                {dayEvents.length > 3 && (
                   <li className="calendar-month-more">
-                    +{events.length - 3}
+                    +{dayEvents.length - 3}
                   </li>
                 )}
               </ul>
@@ -921,6 +958,7 @@ function DayTaskSection({
   tasks,
   selectedDay,
   selectedTaskId,
+  taskMap,
   categoryMap,
   onSelectTask,
   onStartPomodoro,
@@ -930,6 +968,7 @@ function DayTaskSection({
   tasks: Task[];
   selectedDay: Date;
   selectedTaskId: string | null;
+  taskMap: Map<string, Task>;
   categoryMap: Map<string, Category>;
   onSelectTask: (id: string | null) => void;
   onStartPomodoro: (taskId: string) => void;
@@ -957,7 +996,7 @@ function DayTaskSection({
                 className="calendar-day-item-main"
                 onClick={() => onSelectTask(task.id)}
               >
-                <strong>{task.title}</strong>
+                <strong>{formatTaskLineage(task, taskMap)}</strong>
                 <span className="calendar-day-item-meta">
                   {marker === "done" && <em>完成</em>}
                   {marker === "start" && <em>开始</em>}
@@ -1024,7 +1063,7 @@ function DayFocusList({
                 className="calendar-day-item-main"
                 onClick={() => onSelectTask(task.id)}
               >
-                <strong>{task.title}</strong>
+                <strong>{formatTaskLineage(task, taskMap)}</strong>
                 <span className="calendar-day-item-meta">
                   <em>已专注</em>
                   <span>

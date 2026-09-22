@@ -1,4 +1,5 @@
 import type { PomodoroSession, Task } from "./api";
+import { descendantIds, taskById } from "./taskTree";
 import {
   addDays,
   addMonths,
@@ -275,23 +276,61 @@ export function sortGanttTasks(
   });
 }
 
+export interface GanttParentRow {
+  parent: Task;
+  items: Task[];
+}
+
+export function ganttItemsForParent(parent: Task, tasks: Task[]): Task[] {
+  const ids = descendantIds(parent.id, tasks);
+  if (ids.length === 0) return [parent];
+  const byId = taskById(tasks);
+  return ids
+    .map((id) => byId.get(id))
+    .filter((task): task is Task => task != null);
+}
+
+export function ganttParentRows(tasks: Task[]): GanttParentRow[] {
+  return tasks
+    .filter((task) => !task.parent_id)
+    .map((parent) => ({
+      parent,
+      items: ganttItemsForParent(parent, tasks),
+    }));
+}
+
+function doneRank(status: Task["status"]): number {
+  return status === "done" ? 1 : 0;
+}
+
+export function sortGanttParentRows(
+  rows: GanttParentRow[],
+  sessions: PomodoroSession[] = [],
+): GanttParentRow[] {
+  const ordered = rows.map((row) => ({
+    ...row,
+    items: [...row.items].sort((a, b) => doneRank(a.status) - doneRank(b.status)),
+  }));
+  return ordered.sort((a, b) => {
+    const rank = doneRank(a.parent.status) - doneRank(b.parent.status);
+    if (rank !== 0) return rank;
+    const at = Math.min(
+      ...a.items.map((item) => earliestActivityMs(item, sessions)),
+    );
+    const bt = Math.min(
+      ...b.items.map((item) => earliestActivityMs(item, sessions)),
+    );
+    if (at !== bt) return at - bt;
+    return a.parent.sort_order - b.parent.sort_order;
+  });
+}
+
 export interface GanttActivityMark {
   key: string;
   left: number;
   width: number;
   kind: "focus" | "done";
-}
-
-function sessionLocalDays(session: PomodoroSession): Date[] {
-  const start = startOfLocalDay(new Date(session.started_at));
-  const end = startOfLocalDay(
-    new Date(Math.max(session.ended_at - 1, session.started_at)),
-  );
-  const days: Date[] = [];
-  for (let day = start; day.getTime() <= end.getTime(); day = addDays(day, 1)) {
-    days.push(day);
-  }
-  return days;
+  count: number;
 }
 
 export function ganttActivityMarks(
@@ -299,26 +338,28 @@ export function ganttActivityMarks(
   sessions: PomodoroSession[],
   range: GanttRange,
 ): GanttActivityMark[] {
-  const days = new Map<string, Date>();
+  const days = new Map<string, { day: Date; count: number }>();
   for (const session of sessions) {
     if (session.task_id !== task.id) continue;
-    for (const day of sessionLocalDays(session)) {
-      days.set(dayKey(day), day);
-    }
+    const day = startOfLocalDay(new Date(session.started_at));
+    const key = dayKey(day);
+    const prev = days.get(key);
+    if (prev) prev.count += 1;
+    else days.set(key, { day, count: 1 });
   }
   const doneKey =
     task.status === "done"
       ? dayKey(startOfLocalDay(new Date(task.completed_at ?? task.updated_at)))
       : null;
-  if (doneKey && taskCompletedInGanttRange(task, range)) {
-    days.set(
-      doneKey,
-      startOfLocalDay(new Date(task.completed_at ?? task.updated_at)),
-    );
+  if (doneKey && taskCompletedInGanttRange(task, range) && !days.has(doneKey)) {
+    days.set(doneKey, {
+      day: startOfLocalDay(new Date(task.completed_at ?? task.updated_at)),
+      count: 0,
+    });
   }
 
   const marks: GanttActivityMark[] = [];
-  for (const [key, day] of days) {
+  for (const [key, { day, count }] of days) {
     if (day < range.start || day > range.end) continue;
     const startOff = daysBetween(range.start, day);
     marks.push({
@@ -326,6 +367,7 @@ export function ganttActivityMarks(
       left: (startOff / range.unitDays) * range.columnWidth,
       width: Math.max((1 / range.unitDays) * range.columnWidth - 4, 6),
       kind: key === doneKey ? "done" : "focus",
+      count,
     });
   }
   marks.sort((a, b) => a.left - b.left);

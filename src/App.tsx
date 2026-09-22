@@ -19,9 +19,11 @@ import { type GanttActivityMode } from "./lib/gantt";
 import { syncPomodoroPresence } from "./lib/pomodoroPresence";
 import { type PomodoroTick } from "./lib/pomodoroTimer";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
+import { formatTaskLineage, taskById } from "./lib/taskTree";
 import type { TasksSubPage } from "./lib/tasksNav";
 import { CompletedTasksView } from "./views/CompletedTasksView";
 import { CalendarView } from "./views/CalendarView";
+import { CheckinView } from "./views/CheckinView";
 import { GanttView } from "./views/GanttView";
 import { PomodoroView } from "./views/PomodoroView";
 import { CategoryFilter, TasksView } from "./views/TasksView";
@@ -29,7 +31,7 @@ import { UpcomingTasksView } from "./views/UpcomingTasksView";
 import "./styles/app.css";
 
 function App() {
-  const [activeView, setActiveView] = useState<ViewId>("tasks");
+  const [activeView, setActiveView] = useState<ViewId>("checkin");
   const [tasksSubPage, setTasksSubPage] = useState<TasksSubPage>("active");
   const [subNavOpen, setSubNavOpen] = useState<Partial<Record<ViewId, boolean>>>(
     {},
@@ -68,7 +70,9 @@ function App() {
       });
     getPomodoroSettings()
       .then((settings) => {
-        if (!cancelled) setPomodoroSettings(settings);
+        if (!cancelled) {
+          setPomodoroSettings({ ...DEFAULT_POMODORO_SETTINGS, ...settings });
+        }
       })
       .catch(() => {
         /* keep defaults */
@@ -130,6 +134,11 @@ function App() {
     () => tasks.find((t) => t.id === pomodoroTaskId) ?? null,
     [tasks, pomodoroTaskId],
   );
+  const tasksById = useMemo(() => taskById(tasks), [tasks]);
+  const currentTaskTitle = useMemo(() => {
+    const task = pomodoroTask ?? selectedTask;
+    return task ? formatTaskLineage(task, tasksById) : null;
+  }, [pomodoroTask, selectedTask, tasksById]);
 
   const showTasksSubNav = activeView === "tasks" && !!subNavOpen.tasks;
 
@@ -213,9 +222,7 @@ function App() {
           items={NAV_ITEMS}
           activeView={activeView}
           onNavigate={handleNavigate}
-          selectedTaskTitle={
-            pomodoroTask?.title ?? selectedTask?.title ?? null
-          }
+          selectedTaskTitle={currentTaskTitle}
           subNavOpen={subNavOpen}
           onToggleSubNav={handleToggleSubNav}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -267,6 +274,12 @@ function App() {
             weekStartsOn={systemSettings.weekStartsOn}
           />
         )}
+        {activeView === "checkin" && (
+          <CheckinView
+            tasks={tasks}
+            weekStartsOn={systemSettings.weekStartsOn}
+          />
+        )}
         <div
           className={
             activeView === "pomodoro" ? "view-slot" : "view-slot is-hidden"
@@ -274,6 +287,7 @@ function App() {
           aria-hidden={activeView !== "pomodoro"}
         >
           <PomodoroView
+            tasks={tasks}
             selectedTask={pomodoroTask}
             settings={pomodoroSettings}
             playToken={pomodoroPlayToken}

@@ -18,6 +18,7 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   sort_order: number;
+  parent_id: string | null;
   category_id: string | null;
   estimate_pomodoros: number;
   completed_pomodoros: number;
@@ -48,6 +49,7 @@ export function createTask(input: {
   priority?: TaskPriority;
   category_id?: string | null;
   estimate_pomodoros?: number;
+  parent_id?: string | null;
 }): Promise<Task> {
   return invoke("create_task", {
     input: {
@@ -56,6 +58,7 @@ export function createTask(input: {
       priority: input.priority ?? "high",
       category_id: input.category_id ?? null,
       estimate_pomodoros: input.estimate_pomodoros ?? 0,
+      parent_id: input.parent_id ?? null,
     },
   });
 }
@@ -105,6 +108,58 @@ export function deleteTask(id: string): Promise<void> {
 
 export function getTask(id: string): Promise<Task> {
   return invoke("get_task", { id });
+}
+
+export interface HabitCheckin {
+  task_id: string;
+  day: string;
+  note: string;
+}
+
+export interface HabitCheckinItem {
+  habit_id: string;
+  task_id: string;
+  day: string;
+}
+
+export function listHabitCheckins(
+  startDay: string,
+  endDay: string,
+): Promise<HabitCheckin[]> {
+  return invoke("list_habit_checkins", { startDay, endDay });
+}
+
+export function listHabitCheckinItems(
+  startDay: string,
+  endDay: string,
+): Promise<HabitCheckinItem[]> {
+  return invoke("list_habit_checkin_items", { startDay, endDay });
+}
+
+export function saveHabitCheckin(input: {
+  taskId: string;
+  day: string;
+  checked: boolean;
+  note: string;
+  taskIds: string[];
+}): Promise<void> {
+  return invoke("save_habit_checkin", {
+    input: {
+      task_id: input.taskId,
+      day: input.day,
+      checked: input.checked,
+      note: input.note,
+      task_ids: input.taskIds,
+    },
+  });
+}
+
+/** Returns whether the task is checked in after the toggle. */
+export function toggleHabitCheckin(
+  taskId: string,
+  day: string,
+): Promise<boolean> {
+  return invoke("toggle_habit_checkin", { taskId, day });
 }
 
 export function listCategories(): Promise<Category[]> {
@@ -196,6 +251,8 @@ export interface PomodoroSettings {
   longBreakInterval: number;
   autoStartFocus: boolean;
   autoStartBreak: boolean;
+  focusEndSound: string | null;
+  breakEndSound: string | null;
 }
 
 export const DEFAULT_POMODORO_SETTINGS: PomodoroSettings = {
@@ -207,7 +264,13 @@ export const DEFAULT_POMODORO_SETTINGS: PomodoroSettings = {
   longBreakInterval: 4,
   autoStartFocus: false,
   autoStartBreak: false,
+  focusEndSound: null,
+  breakEndSound: null,
 };
+
+export function readSoundFile(path: string): Promise<number[]> {
+  return invoke("read_sound_file", { path });
+}
 
 export function getPomodoroSettings(): Promise<PomodoroSettings> {
   return invoke("get_pomodoro_settings");

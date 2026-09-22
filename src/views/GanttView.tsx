@@ -20,14 +20,17 @@ import {
   ganttBarLayout,
   ganttContinuousBarLayout,
   ganttColumnIsToday,
+  ganttParentRows,
   ganttRangeQueryMs,
   ganttTaskColor,
-  sortGanttTasks,
+  sortGanttParentRows,
   startOfQuarter,
   taskVisibleOnGantt,
   todayOffsetPx,
   type GanttActivityMode,
   type GanttColumn,
+  type GanttParentRow,
+  type GanttRange,
   type GanttScale,
 } from "../lib/gantt";
 
@@ -73,6 +76,12 @@ export function GanttView({
     Map<string, number>
   >(new Map());
   const [error, setError] = useState<string | null>(null);
+  const [hover, setHover] = useState<{
+    task: Task;
+    parent: Task;
+    x: number;
+    y: number;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -138,22 +147,52 @@ export function GanttView({
     [sessions],
   );
 
-  const visibleTasks = useMemo(() => {
-    const filtered = tasks.filter((t) => {
-      if (hideDone && t.status === "done") return false;
-      if (categoryFilter === "none") return !t.category_id;
-      if (categoryFilter !== "all" && t.category_id !== categoryFilter) {
-        return false;
-      }
-      if (
-        activityMode === "continuous" &&
-        ganttContinuousBarLayout(t, range, firstFocusStarts, today) != null
-      ) {
+  function taskInGanttRange(task: Task): boolean {
+    if (categoryFilter === "none" && task.category_id) return false;
+    if (categoryFilter !== "all" && categoryFilter !== "none" && task.category_id !== categoryFilter) {
+      return false;
+    }
+    if (
+      activityMode === "continuous" &&
+      ganttContinuousBarLayout(task, range, firstFocusStarts, today) != null
+    ) {
+      return true;
+    }
+    return taskVisibleOnGantt(task, range, sessionTaskIds);
+  }
+
+  function itemVisibleOnGantt(task: Task): boolean {
+    if (hideDone && task.status === "done") return false;
+    return taskInGanttRange(task);
+  }
+
+  const visibleRows = useMemo(() => {
+    const rows = ganttParentRows(tasks)
+      .map((row) => {
+        const visibleItems = row.items.filter((item) => itemVisibleOnGantt(item));
+        if (visibleItems.length > 0) return { ...row, items: visibleItems };
+        const familyInRange =
+          taskInGanttRange(row.parent) ||
+          row.items.some((item) => taskInGanttRange(item));
+        // Completed subtasks drop out of the lanes, but an unfinished parent
+        // stays when this family still belongs in the current range.
+        if (familyInRange && !(hideDone && row.parent.status === "done")) {
+          return { ...row, items: [row.parent] };
+        }
+        return { ...row, items: [] };
+      })
+      .filter((row) => {
+        if (row.items.length === 0) return false;
+        if (hideDone && row.parent.status === "done" && row.items.every((item) => item.status === "done")) {
+          return false;
+        }
+        if (categoryFilter === "none") return !row.parent.category_id;
+        if (categoryFilter !== "all" && row.parent.category_id !== categoryFilter) {
+          return false;
+        }
         return true;
-      }
-      return taskVisibleOnGantt(t, range, sessionTaskIds);
-    });
-    return sortGanttTasks(filtered, sessions);
+      });
+    return sortGanttParentRows(rows, sessions);
   }, [
     tasks,
     hideDone,
@@ -293,7 +332,7 @@ export function GanttView({
 
       {error && <p className="error-banner">{error}</p>}
 
-      {visibleTasks.length === 0 && (
+      {visibleRows.length === 0 && (
         <p className="gantt-empty">{emptyMessage}</p>
       )}
 
@@ -328,113 +367,25 @@ export function GanttView({
               </div>
             </div>
 
-              {visibleTasks.map((task) => {
-                const continuousBar =
-                  activityMode === "continuous"
-                    ? ganttContinuousBarLayout(task, range, firstFocusStarts, today)
-                    : null;
-                const bar =
-                  continuousBar ?? ganttBarLayout(task, range);
-                const marks =
-                  activityMode === "discrete"
-                    ? ganttActivityMarks(task, sessions, range)
-                    : [];
-                const category = task.category_id
-                  ? categoryMap.get(task.category_id)
-                  : null;
-                const color = ganttTaskColor(task.id);
-                return (
-                  <div
-                    key={task.id}
-                    className="gantt-row"
-                    title={task.title}
-                  >
-                    <div
-                      className={`gantt-name-cell${
-                        selectedTaskId === task.id ? " is-selected" : ""
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        className={`gantt-name${
-                          task.status === "done" ? " is-done" : ""
-                        }`}
-                        onClick={() => onSelectTask(task.id)}
-                        title={task.title}
-                      >
-                        <span
-                          className="gantt-name-swatch"
-                          style={{ background: color }}
-                          aria-hidden
-                        />
-                        <span className="gantt-name-text">{task.title}</span>
-                      </button>
-                      {task.status !== "done" && (
-                        <button
-                          type="button"
-                          className="gantt-name-play"
-                          title="开始番茄钟"
-                          onClick={() => onStartPomodoro(task.id)}
-                        >
-                          ▶
-                        </button>
-                      )}
-                    </div>
-                    <div
-                      className="gantt-track"
-                      style={{ width: `${timelineWidth}px` }}
-                      onClick={() => onSelectTask(task.id)}
-                    >
-                      <GanttTrackBg
-                        columns={range.columns}
-                        columnWidth={range.columnWidth}
-                        todayLeft={todayLeft}
-                      />
-                      {marks.map((mark) => (
-                        <span
-                          key={mark.key}
-                          className={`gantt-mark is-${mark.kind}${
-                            bar ? "" : " is-solo"
-                          }`}
-                          style={{
-                            left: `${mark.left}px`,
-                            width: `${mark.width}px`,
-                            backgroundColor: color,
-                          }}
-                          title={mark.kind === "done" ? "完成" : "专注"}
-                        />
-                      ))}
-                      {bar && (
-                        <button
-                          type="button"
-                          className={`gantt-bar${
-                            selectedTaskId === task.id ? " is-selected" : ""
-                          }${task.status === "done" ? " is-done" : ""}${
-                            continuousBar ? " is-continuous" : ""
-                          }${
-                            bar.clippedStart ? " is-clip-start" : ""
-                          }${bar.clippedEnd ? " is-clip-end" : ""}`}
-                          style={{
-                            left: `${bar.left}px`,
-                            width: `${bar.width}px`,
-                            backgroundColor: color,
-                          }}
-                          title={`${task.title} · 优先级 ${PRIORITY_LABEL[task.priority]}${
-                            category ? ` · ${category.name}` : ""
-                          }`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelectTask(task.id);
-                          }}
-                        >
-                          <span className="gantt-bar-label">{task.title}</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              {visibleTasks.length === 0 && (
+              {visibleRows.map((row) => (
+                <GanttParentRowView
+                  key={row.parent.id}
+                  row={row}
+                  activityMode={activityMode}
+                  range={range}
+                  firstFocusStarts={firstFocusStarts}
+                  today={today}
+                  sessions={sessions}
+                  categoryMap={categoryMap}
+                  selectedTaskId={selectedTaskId}
+                  timelineWidth={timelineWidth}
+                  todayLeft={todayLeft}
+                  onSelectTask={onSelectTask}
+                  onStartPomodoro={onStartPomodoro}
+                  onHover={setHover}
+                />
+              ))}
+              {visibleRows.length === 0 && (
                 <div className="gantt-row gantt-row-fill">
                   <div className="gantt-name-cell" />
                   <div
@@ -452,6 +403,282 @@ export function GanttView({
           </div>
         </div>
       </div>
+
+      {hover && (
+        <GanttTaskHover
+          task={hover.task}
+          parent={hover.parent}
+          x={hover.x}
+          y={hover.y}
+          category={
+            hover.task.category_id
+              ? categoryMap.get(hover.task.category_id) ?? null
+              : null
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+function GanttParentRowView({
+  row,
+  activityMode,
+  range,
+  firstFocusStarts,
+  today,
+  sessions,
+  categoryMap,
+  selectedTaskId,
+  timelineWidth,
+  todayLeft,
+  onSelectTask,
+  onStartPomodoro,
+  onHover,
+}: {
+  row: GanttParentRow;
+  activityMode: GanttActivityMode;
+  range: GanttRange;
+  firstFocusStarts: ReadonlyMap<string, number>;
+  today: Date;
+  sessions: PomodoroSession[];
+  categoryMap: Map<string, Category>;
+  selectedTaskId: string | null;
+  timelineWidth: number;
+  todayLeft: number | null;
+  onSelectTask: (id: string | null) => void;
+  onStartPomodoro: (taskId: string) => void;
+  onHover: (
+    next: { task: Task; parent: Task; x: number; y: number } | null,
+  ) => void;
+}) {
+  const { parent, items } = row;
+  const lanes = items.map((task) => {
+    const continuousBar =
+      activityMode === "continuous"
+        ? ganttContinuousBarLayout(task, range, firstFocusStarts, today)
+        : null;
+    return {
+      task,
+      continuousBar,
+      bar: continuousBar ?? ganttBarLayout(task, range),
+      marks:
+        activityMode === "discrete"
+          ? ganttActivityMarks(task, sessions, range)
+          : [],
+      color: ganttTaskColor(task.id),
+    };
+  });
+  const laneCount = Math.max(lanes.length, 1);
+  const stacked = lanes.length > 1;
+  const parentColor = ganttTaskColor(parent.id);
+  const childCount = items.some((item) => item.id !== parent.id)
+    ? items.length
+    : 0;
+
+  return (
+    <div
+      className={`gantt-row${stacked ? " is-stacked" : ""}`}
+      style={{ minHeight: `${laneCount * 2.15}rem` }}
+      onMouseLeave={() => onHover(null)}
+    >
+      <div
+        className={`gantt-name-cell${
+          selectedTaskId === parent.id ||
+          items.some((item) => item.id === selectedTaskId)
+            ? " is-selected"
+            : ""
+        }`}
+      >
+        <button
+          type="button"
+          className={`gantt-name${parent.status === "done" ? " is-done" : ""}`}
+          onClick={() => onSelectTask(parent.id)}
+          title={parent.title}
+          onMouseEnter={(e) =>
+            onHover({ task: parent, parent, x: e.clientX, y: e.clientY })
+          }
+          onMouseMove={(e) =>
+            onHover({ task: parent, parent, x: e.clientX, y: e.clientY })
+          }
+        >
+          <span
+            className="gantt-name-swatch"
+            style={{ background: parentColor }}
+            aria-hidden
+          />
+          <span className="gantt-name-text">{parent.title}</span>
+          {childCount > 0 && (
+            <span className="gantt-sub-count">{childCount}</span>
+          )}
+        </button>
+        {parent.status !== "done" && (
+          <button
+            type="button"
+            className="gantt-name-play"
+            title="开始番茄钟"
+            onClick={() => onStartPomodoro(parent.id)}
+          >
+            ▶
+          </button>
+        )}
+      </div>
+      <div
+        className="gantt-track"
+        style={{
+          width: `${timelineWidth}px`,
+          minHeight: `${laneCount * 2.15}rem`,
+        }}
+        onClick={() => onSelectTask(parent.id)}
+      >
+        <GanttTrackBg
+          columns={range.columns}
+          columnWidth={range.columnWidth}
+          todayLeft={todayLeft}
+        />
+        {lanes.map((lane, index) => {
+          const category = lane.task.category_id
+            ? categoryMap.get(lane.task.category_id)
+            : null;
+          return (
+            <div
+              key={lane.task.id}
+              className="gantt-lane"
+              style={{
+                top: `${index * 2.15}rem`,
+                height: "2.15rem",
+              }}
+            >
+              {lane.marks.map((mark) => (
+                <span
+                  key={mark.key}
+                  className={`gantt-mark is-${mark.kind}${
+                    lane.bar ? "" : " is-solo"
+                  }${mark.count > 0 ? " has-count" : ""}`}
+                  style={{
+                    left: `${mark.left}px`,
+                    width: `${mark.width}px`,
+                    backgroundColor: lane.color,
+                  }}
+                  title={
+                    mark.count > 0
+                      ? `完成 ${mark.count} 个番茄`
+                      : mark.kind === "done"
+                        ? "完成"
+                        : "专注"
+                  }
+                  onMouseEnter={(e) => {
+                    onHover({
+                      task: lane.task,
+                      parent,
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
+                  }}
+                  onMouseMove={(e) => {
+                    onHover({
+                      task: lane.task,
+                      parent,
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
+                  }}
+                >
+                  {mark.count > 0 ? mark.count : ""}
+                </span>
+              ))}
+              {lane.bar && (
+                <button
+                  type="button"
+                  className={`gantt-bar${
+                    selectedTaskId === lane.task.id ? " is-selected" : ""
+                  }${lane.task.status === "done" ? " is-done" : ""}${
+                    lane.continuousBar ? " is-continuous" : ""
+                  }${lane.bar.clippedStart ? " is-clip-start" : ""}${
+                    lane.bar.clippedEnd ? " is-clip-end" : ""
+                  }`}
+                  style={{
+                    left: `${lane.bar.left}px`,
+                    width: `${lane.bar.width}px`,
+                    backgroundColor: lane.color,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectTask(lane.task.id);
+                  }}
+                  onMouseEnter={(e) => {
+                    onHover({
+                      task: lane.task,
+                      parent,
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
+                  }}
+                  onMouseMove={(e) => {
+                    onHover({
+                      task: lane.task,
+                      parent,
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
+                  }}
+                >
+                  <span className="gantt-bar-label">
+                    {lane.task.title}
+                    {category ? ` · ${category.name}` : ""}
+                  </span>
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function GanttTaskHover({
+  task,
+  parent,
+  x,
+  y,
+  category,
+}: {
+  task: Task;
+  parent: Task;
+  x: number;
+  y: number;
+  category: Category | null;
+}) {
+  const left = Math.min(x + 14, window.innerWidth - 280);
+  const top = Math.min(y + 16, window.innerHeight - 180);
+  return (
+    <div
+      className="gantt-hover-card"
+      style={{ left, top }}
+      role="tooltip"
+    >
+      <strong>{task.title}</strong>
+      {task.id !== parent.id && <p>父任务 {parent.title}</p>}
+      <p>
+        {task.status === "done" ? "已完成" : "未完成"}
+        {` · 优先级 ${PRIORITY_LABEL[task.priority]}`}
+        {category ? ` · ${category.name}` : ""}
+      </p>
+      {(task.start_at != null || task.due_at != null) && (
+        <p>
+          {task.start_at
+            ? `开始 ${new Date(task.start_at).toLocaleDateString("zh-CN")}`
+            : ""}
+          {task.start_at && task.due_at ? " · " : ""}
+          {task.due_at
+            ? `到期 ${new Date(task.due_at).toLocaleDateString("zh-CN")}`
+            : ""}
+        </p>
+      )}
+      <p>
+        番茄 {task.completed_pomodoros ?? 0}/{task.estimate_pomodoros ?? 0}
+      </p>
     </div>
   );
 }
