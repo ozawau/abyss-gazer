@@ -151,6 +151,37 @@ pub struct FocusCountRow {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FirstFocusStart {
+    pub task_id: String,
+    pub started_at: i64,
+}
+
+#[tauri::command]
+pub fn list_first_completed_focus_starts(
+    db: State<'_, DbState>,
+) -> Result<Vec<FirstFocusStart>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT task_id, MIN(started_at)
+             FROM pomodoro_sessions
+             WHERE kind = 'focus'
+               AND completed = 1
+             GROUP BY task_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(FirstFocusStart {
+                task_id: row.get(0)?,
+                started_at: row.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.map(|row| row.map_err(|e| e.to_string())).collect()
+}
+
 #[tauri::command]
 pub fn list_pomodoro_sessions_in_range(
     db: State<'_, DbState>,

@@ -13,6 +13,25 @@ import {
 } from "./calendar";
 
 export type GanttScale = "week" | "month" | "quarter";
+export type GanttActivityMode = "discrete" | "continuous";
+
+function hashTaskId(taskId: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < taskId.length; i++) {
+    hash ^= taskId.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/** Stable, visually distinct color for a Gantt task. */
+export function ganttTaskColor(taskId: string): string {
+  const hash = hashTaskId(taskId);
+  const hue = Math.round((hash * 137.508) % 360);
+  const sat = 54 + (hash % 22);
+  const light = 40 + ((hash >>> 9) % 12);
+  return `hsl(${hue} ${sat}% ${light}%)`;
+}
 
 export interface GanttColumn {
   start: Date;
@@ -184,6 +203,49 @@ export function taskVisibleOnGantt(
   if (ganttBarLayout(task, range) != null) return true;
   if (taskCompletedInGanttRange(task, range)) return true;
   return sessionTaskIds.has(task.id);
+}
+
+export interface GanttContinuousBarLayout {
+  left: number;
+  width: number;
+  clippedStart: boolean;
+  clippedEnd: boolean;
+}
+
+export function ganttContinuousBarLayout(
+  task: Task,
+  range: GanttRange,
+  firstFocusStarts: ReadonlyMap<string, number>,
+  today: Date = startOfLocalDay(new Date()),
+): GanttContinuousBarLayout | null {
+  const focusStart = firstFocusStarts.get(task.id);
+  const startMs = task.start_at ?? focusStart;
+  const todayDay = startOfLocalDay(today);
+
+  let start: Date;
+  let end: Date;
+  if (task.status === "done") {
+    const completionMs = task.completed_at ?? task.updated_at;
+    start = startOfLocalDay(new Date(startMs ?? completionMs));
+    end = startOfLocalDay(new Date(completionMs));
+  } else {
+    if (startMs == null) return null;
+    start = startOfLocalDay(new Date(startMs));
+    end = todayDay;
+  }
+  if (end < start) end = start;
+  if (end < range.start || start > range.end) return null;
+
+  const clipStart = start < range.start ? range.start : start;
+  const clipEnd = end > range.end ? range.end : end;
+  const startOff = daysBetween(range.start, clipStart);
+  const inclusiveDays = daysBetween(clipStart, clipEnd) + 1;
+  return {
+    left: (startOff / range.unitDays) * range.columnWidth,
+    width: (inclusiveDays / range.unitDays) * range.columnWidth,
+    clippedStart: start < range.start,
+    clippedEnd: end > range.end,
+  };
 }
 
 function earliestActivityMs(task: Task, sessions: PomodoroSession[]): number {

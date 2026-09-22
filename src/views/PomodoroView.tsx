@@ -9,6 +9,13 @@ import {
   startOfLocalDayMs,
   Task,
 } from "../lib/api";
+import {
+  formatPomodoroClock,
+  pomodoroPhaseLabel,
+  type PomodoroPhase,
+  type PomodoroStatus,
+  type PomodoroTick,
+} from "../lib/pomodoroTimer";
 
 interface PomodoroViewProps {
   selectedTask: Task | null;
@@ -20,20 +27,11 @@ interface PomodoroViewProps {
   onToggleFullscreen?: () => void;
   /** Whether a session is running or paused (not idle). */
   onTimingChange?: (timing: boolean) => void;
+  onTick?: (tick: PomodoroTick) => void;
 }
 
-type TimerPhase = "focus" | "break" | "long_break";
-type TimerStatus = "idle" | "running" | "paused";
-
-function formatTime(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const s = Math.floor(totalSeconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${m}:${s}`;
-}
+type TimerPhase = PomodoroPhase;
+type TimerStatus = PomodoroStatus;
 
 function plannedFor(phase: TimerPhase, settings: PomodoroSettings): number {
   if (phase === "focus") return Math.max(1, settings.focusMinutes) * 60;
@@ -41,12 +39,6 @@ function plannedFor(phase: TimerPhase, settings: PomodoroSettings): number {
     return Math.max(1, settings.longBreakMinutes) * 60;
   }
   return Math.max(1, settings.shortBreakMinutes) * 60;
-}
-
-function phaseLabel(phase: TimerPhase): string {
-  if (phase === "focus") return "专注";
-  if (phase === "long_break") return "长休息";
-  return "短休息";
 }
 
 function toSessionKind(phase: TimerPhase): SessionKind {
@@ -65,6 +57,7 @@ export function PomodoroView({
   fullscreen = false,
   onToggleFullscreen,
   onTimingChange,
+  onTick,
 }: PomodoroViewProps) {
   const [phase, setPhase] = useState<TimerPhase>("focus");
   const [status, setStatus] = useState<TimerStatus>("idle");
@@ -84,16 +77,22 @@ export function PomodoroView({
   const sessionTaskIdRef = useRef<string | null>(null);
   const lastPlayTokenRef = useRef(0);
   const settingsRef = useRef(settings);
+  const boundTaskKeyRef = useRef<string | null>(
+    selectedTask ? `${selectedTask.id}:${selectedTask.status}` : null,
+  );
+  const lastTaskTitleRef = useRef<string | null>(selectedTask?.title ?? null);
 
   phaseRef.current = phase;
   statusRef.current = status;
   remainingRef.current = remaining;
   selectedTaskRef.current = selectedTask;
   settingsRef.current = settings;
+  if (selectedTask) lastTaskTitleRef.current = selectedTask.title;
 
   useEffect(() => {
     onTimingChange?.(status === "running" || status === "paused");
-  }, [status, onTimingChange]);
+    onTick?.({ status, remaining, phase });
+  }, [status, remaining, phase, onTimingChange, onTick]);
 
   // Apply duration changes while idle so the next session uses new settings.
   useEffect(() => {
@@ -148,7 +147,9 @@ export function PomodoroView({
         if (selectedTaskRef.current?.id === id) setTodayCount(n);
       }
     } catch (err) {
-      setError(String(err));
+      const message = String(err);
+      if (message.includes("Task not found")) return;
+      setError(message);
     }
   }
 
@@ -219,6 +220,26 @@ export function PomodoroView({
     finishingRef.current = false;
     maybeAutoStart(nextPhase);
   }
+
+  useEffect(() => {
+    const next = selectedTask
+      ? `${selectedTask.id}:${selectedTask.status}`
+      : null;
+    const prev = boundTaskKeyRef.current;
+    boundTaskKeyRef.current = next;
+
+    if (statusRef.current !== "running") return;
+
+    const deleted = prev != null && next == null;
+    const completed =
+      selectedTask?.status === "done" &&
+      prev != null &&
+      prev.endsWith(":todo") &&
+      prev.startsWith(`${selectedTask.id}:`);
+    if (deleted || completed) {
+      setStatus("paused");
+    }
+  }, [selectedTask]);
 
   useEffect(() => {
     if (status !== "running") return;
@@ -359,7 +380,7 @@ export function PomodoroView({
         )}
       </header>
 
-      {!selectedTask ? (
+      {!selectedTask && status === "idle" ? (
         <div className="pomodoro-locked">
           <p>请先在「任务」中选择一个任务。</p>
         </div>
@@ -367,8 +388,14 @@ export function PomodoroView({
         <div className="pomodoro-panel">
           <div className="pomodoro-task">
             <span className="chip-label">专注于</span>
-            <strong>{selectedTask.title}</strong>
-            <span className="focus-count">今日专注 {todayCount} 次</span>
+            <strong>
+              {selectedTask?.title ?? lastTaskTitleRef.current ?? "任务已删除"}
+            </strong>
+            {selectedTask ? (
+              <span className="focus-count">今日专注 {todayCount} 次</span>
+            ) : (
+              <span className="focus-count">任务已删除，计时已暂停</span>
+            )}
           </div>
 
           <div
@@ -376,8 +403,8 @@ export function PomodoroView({
             style={{ ["--progress" as string]: String(progress) }}
           >
             <div className="timer-face">
-              <span className="timer-phase">{phaseLabel(phase)}</span>
-              <span className="timer-digits">{formatTime(remaining)}</span>
+              <span className="timer-phase">{pomodoroPhaseLabel(phase)}</span>
+              <span className="timer-digits">{formatPomodoroClock(remaining)}</span>
               <span className="timer-status">
                 {status === "running"
                   ? "进行中"
@@ -390,7 +417,12 @@ export function PomodoroView({
 
           <div className="timer-controls">
             {status !== "running" ? (
-              <button type="button" className="primary-btn" onClick={start}>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={start}
+                disabled={!selectedTask}
+              >
                 {status === "paused" ? "继续" : "开始"}
               </button>
             ) : (

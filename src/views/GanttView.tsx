@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Category,
   listCategories,
+  listFirstCompletedFocusStarts,
   listPomodoroSessionsInRange,
   PomodoroSession,
   Task,
@@ -9,7 +10,6 @@ import {
 } from "../lib/api";
 import {
   addMonths,
-  categoryColor,
   startOfLocalDay,
   type WeekStartsOn,
 } from "../lib/calendar";
@@ -18,12 +18,15 @@ import {
   formatGanttTitle,
   ganttActivityMarks,
   ganttBarLayout,
+  ganttContinuousBarLayout,
   ganttColumnIsToday,
   ganttRangeQueryMs,
+  ganttTaskColor,
   sortGanttTasks,
   startOfQuarter,
   taskVisibleOnGantt,
   todayOffsetPx,
+  type GanttActivityMode,
   type GanttColumn,
   type GanttScale,
 } from "../lib/gantt";
@@ -34,6 +37,8 @@ interface GanttViewProps {
   onSelectTask: (id: string | null) => void;
   onStartPomodoro: (taskId: string) => void;
   weekStartsOn: WeekStartsOn;
+  activityMode: GanttActivityMode;
+  onActivityModeChange: (mode: GanttActivityMode) => void;
 }
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -54,6 +59,8 @@ export function GanttView({
   onSelectTask,
   onStartPomodoro,
   weekStartsOn,
+  activityMode,
+  onActivityModeChange,
 }: GanttViewProps) {
   const today = useMemo(() => startOfLocalDay(new Date()), []);
   const [scale, setScale] = useState<GanttScale>("month");
@@ -62,6 +69,9 @@ export function GanttView({
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [hideDone, setHideDone] = useState(false);
   const [sessions, setSessions] = useState<PomodoroSession[]>([]);
+  const [firstFocusStarts, setFirstFocusStarts] = useState<
+    Map<string, number>
+  >(new Map());
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -92,6 +102,24 @@ export function GanttView({
 
   useEffect(() => {
     let cancelled = false;
+    listFirstCompletedFocusStarts()
+      .then((rows) => {
+        if (!cancelled) {
+          setFirstFocusStarts(
+            new Map(rows.map((row) => [row.task_id, row.started_at])),
+          );
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     const { startMs, endMs } = ganttRangeQueryMs(range);
     listPomodoroSessionsInRange(startMs, endMs)
       .then((rows) => {
@@ -117,10 +145,26 @@ export function GanttView({
       if (categoryFilter !== "all" && t.category_id !== categoryFilter) {
         return false;
       }
+      if (
+        activityMode === "continuous" &&
+        ganttContinuousBarLayout(t, range, firstFocusStarts, today) != null
+      ) {
+        return true;
+      }
       return taskVisibleOnGantt(t, range, sessionTaskIds);
     });
     return sortGanttTasks(filtered, sessions);
-  }, [tasks, hideDone, categoryFilter, range, sessionTaskIds, sessions]);
+  }, [
+    tasks,
+    hideDone,
+    categoryFilter,
+    activityMode,
+    firstFocusStarts,
+    today,
+    range,
+    sessionTaskIds,
+    sessions,
+  ]);
 
   const todayLeft = useMemo(
     () => todayOffsetPx(range, today),
@@ -197,32 +241,54 @@ export function GanttView({
         </div>
       </header>
 
-      <div className="calendar-filters">
-        <strong className="calendar-period-title">{title}</strong>
-        <GanttJump scale={scale} cursor={cursor} onJump={jumpTo} />
-        <label className="calendar-filter-field">
-          <span>分类</span>
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-          >
-            <option value="all">全部</option>
-            <option value="none">未分类</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="calendar-filter-check">
-          <input
-            type="checkbox"
-            checked={hideDone}
-            onChange={(e) => setHideDone(e.target.checked)}
-          />
-          隐藏已完成
-        </label>
+      <div className="calendar-filters gantt-filters">
+        <div className="gantt-filters-main">
+          <strong className="calendar-period-title">{title}</strong>
+          <GanttJump scale={scale} cursor={cursor} onJump={jumpTo} />
+          <label className="calendar-filter-field">
+            <span>分类</span>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+            >
+              <option value="all">全部</option>
+              <option value="none">未分类</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="calendar-filter-check">
+            <input
+              type="checkbox"
+              checked={hideDone}
+              onChange={(e) => setHideDone(e.target.checked)}
+            />
+            隐藏已完成
+          </label>
+        </div>
+        <div
+          className="gantt-activity-switch"
+          role="radiogroup"
+          aria-label="任务活动显示模式"
+        >
+          {(["discrete", "continuous"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={activityMode === mode}
+              className={`gantt-activity-switch-option${
+                activityMode === mode ? " is-active" : ""
+              }`}
+              onClick={() => onActivityModeChange(mode)}
+            >
+              {mode === "discrete" ? "离散" : "连续"}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && <p className="error-banner">{error}</p>}
@@ -263,14 +329,26 @@ export function GanttView({
             </div>
 
               {visibleTasks.map((task) => {
-                const bar = ganttBarLayout(task, range);
-                const marks = ganttActivityMarks(task, sessions, range);
+                const continuousBar =
+                  activityMode === "continuous"
+                    ? ganttContinuousBarLayout(task, range, firstFocusStarts, today)
+                    : null;
+                const bar =
+                  continuousBar ?? ganttBarLayout(task, range);
+                const marks =
+                  activityMode === "discrete"
+                    ? ganttActivityMarks(task, sessions, range)
+                    : [];
                 const category = task.category_id
                   ? categoryMap.get(task.category_id)
                   : null;
-                const color = categoryColor(task.category_id, categoryMap);
+                const color = ganttTaskColor(task.id);
                 return (
-                  <div key={task.id} className="gantt-row">
+                  <div
+                    key={task.id}
+                    className="gantt-row"
+                    title={task.title}
+                  >
                     <div
                       className={`gantt-name-cell${
                         selectedTaskId === task.id ? " is-selected" : ""
@@ -332,6 +410,8 @@ export function GanttView({
                           className={`gantt-bar${
                             selectedTaskId === task.id ? " is-selected" : ""
                           }${task.status === "done" ? " is-done" : ""}${
+                            continuousBar ? " is-continuous" : ""
+                          }${
                             bar.clippedStart ? " is-clip-start" : ""
                           }${bar.clippedEnd ? " is-clip-end" : ""}`}
                           style={{

@@ -238,6 +238,49 @@ textarea {
   color: var(--text-muted);
 }
 
+.nav-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18rem;
+  margin-left: 0.35rem;
+  padding: 0.12rem 0.42rem 0.12rem 0.32rem;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.22);
+  animation: nav-timer-pulse 1.5s ease-in-out infinite;
+}
+
+.nav-timer.is-break,
+.nav-timer.is-long_break {
+  background: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.22);
+}
+
+.nav-timer.is-paused {
+  animation: none;
+  background: #64748b;
+  box-shadow: none;
+}
+
+.nav-timer-clock {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes nav-timer-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.16);
+  }
+}
+
 .sidebar-footer {
   padding: 0.5rem;
   display: flex;
@@ -262,7 +305,6 @@ textarea {
 }
 
 .selected-task-chip,
-.db-path-chip,
 .pomodoro-task {
   display: flex;
   flex-direction: column;
@@ -271,15 +313,6 @@ textarea {
   border-radius: 8px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-}
-
-.db-path-value {
-  font-size: 0.68rem;
-  font-family: var(--mono);
-  line-height: 1.35;
-  white-space: normal;
-  word-break: break-all;
-  color: var(--text-muted);
 }
 
 .chip-label {
@@ -1564,7 +1597,11 @@ body.is-task-dragging * {
 }
 
 .timer-ring.phase-focus {
-  --ring-color: var(--focus-glow);
+  --ring-color: #dc2626;
+}
+
+.timer-ring.phase-focus .timer-digits {
+  color: #dc2626;
 }
 
 .timer-ring.phase-break {
@@ -1614,7 +1651,8 @@ body.is-task-dragging * {
 /* Settings dialog */
 .settings-dialog {
   width: min(720px, 100%);
-  max-height: min(80vh, 640px);
+  height: min(80vh, 640px);
+  max-height: calc(100vh - 2rem);
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -1933,6 +1971,45 @@ body.is-task-dragging * {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem 1rem;
+}
+
+.gantt-filters {
+  justify-content: space-between;
+}
+
+.gantt-filters-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  min-width: 0;
+}
+
+.gantt-activity-switch {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 0.14rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.gantt-activity-switch-option {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.32rem 0.95rem;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.gantt-activity-switch-option.is-active {
+  background: var(--bg-panel);
+  color: #1e3a8a;
+  font-weight: 600;
+  box-shadow: var(--shadow);
 }
 
 .calendar-period-title {
@@ -2795,6 +2872,10 @@ body.is-task-dragging * {
   left: 0;
   z-index: 3;
   flex: 0 0 var(--gantt-name-col);
+  min-width: 0;
+  width: var(--gantt-name-col);
+  max-width: var(--gantt-name-col);
+  overflow: hidden;
   align-items: center;
   gap: 0.15rem;
   box-sizing: border-box;
@@ -2906,6 +2987,10 @@ body.is-task-dragging * {
 
 .gantt-bar:hover {
   filter: brightness(1.07);
+}
+
+.gantt-bar.is-continuous {
+  border-radius: 5px;
 }
 
 .gantt-bar.is-done {

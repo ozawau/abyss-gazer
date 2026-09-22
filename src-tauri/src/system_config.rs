@@ -31,10 +31,16 @@ pub struct SystemSettings {
     /// Calendar week start: 0=Sunday … 6=Saturday (same as JS `Date.getDay()`).
     #[serde(default = "default_week_starts_on")]
     pub week_starts_on: u8,
+    #[serde(default = "default_gantt_activity_mode")]
+    pub gantt_activity_mode: String,
 }
 
 fn default_week_starts_on() -> u8 {
     1
+}
+
+fn default_gantt_activity_mode() -> String {
+    "discrete".into()
 }
 
 impl Default for SystemSettings {
@@ -47,6 +53,7 @@ impl Default for SystemSettings {
             local_backup_dir: None,
             git_commit_message: "chore: sync Abyss Gazer data".into(),
             week_starts_on: default_week_starts_on(),
+            gantt_activity_mode: default_gantt_activity_mode(),
         }
     }
 }
@@ -63,6 +70,14 @@ fn normalize_interval(minutes: i64) -> i64 {
     match minutes {
         5 | 10 | 30 => minutes,
         _ => 10,
+    }
+}
+
+fn normalize_gantt_activity_mode(value: &str) -> String {
+    if value == "continuous" {
+        "continuous".into()
+    } else {
+        default_gantt_activity_mode()
     }
 }
 
@@ -91,15 +106,13 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
         local_backup_dir,
         git_commit_message,
         week_starts_on: normalize_week_starts_on(settings.week_starts_on),
+        gantt_activity_mode: normalize_gantt_activity_mode(&settings.gantt_activity_mode),
     }
 }
 
-/// Fixed config root (always Application Support / Abyss Gazer).
+/// Default data root (database). Config files live in `~/.config/abyss-gazer`.
 pub fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let home = app
-        .path()
-        .home_dir()
-        .map_err(|e| format!("resolve home dir: {e}"))?;
+    let home = home_dir(app)?;
 
     #[cfg(target_os = "macos")]
     let dir = home.join("Library/Application Support/Abyss Gazer");
@@ -113,23 +126,50 @@ pub fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
+/// Location of `system.json`: `~/.config/abyss-gazer`.
+pub fn resolve_system_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(home_dir(app)?.join(".config").join("abyss-gazer"))
+}
+
+fn home_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .home_dir()
+        .map_err(|e| format!("resolve home dir: {e}"))
+}
+
+fn system_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_system_config_dir(app)?.join(SYSTEM_CONFIG_FILE))
+}
+
+fn legacy_system_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(resolve_config_dir(app)?.join(SYSTEM_CONFIG_FILE))
 }
 
-pub fn read_system_settings(app: &AppHandle) -> Result<SystemSettings, String> {
-    let path = config_path(app)?;
-    if !path.exists() {
-        return Ok(SystemSettings::default());
-    }
-    let raw = fs::read_to_string(&path).map_err(|e| format!("read system config: {e}"))?;
+fn parse_system_settings(raw: &str) -> Result<SystemSettings, String> {
     let parsed: SystemSettings =
-        serde_json::from_str(&raw).map_err(|e| format!("parse system config: {e}"))?;
+        serde_json::from_str(raw).map_err(|e| format!("parse system config: {e}"))?;
     Ok(normalize_system_settings(parsed))
 }
 
+pub fn read_system_settings(app: &AppHandle) -> Result<SystemSettings, String> {
+    let path = system_config_path(app)?;
+    if path.exists() {
+        let raw = fs::read_to_string(&path).map_err(|e| format!("read system config: {e}"))?;
+        return parse_system_settings(&raw);
+    }
+
+    let legacy = legacy_system_config_path(app)?;
+    if !legacy.exists() {
+        return Ok(SystemSettings::default());
+    }
+    let raw = fs::read_to_string(&legacy).map_err(|e| format!("read system config: {e}"))?;
+    let settings = parse_system_settings(&raw)?;
+    let _ = write_system_settings(app, &settings);
+    Ok(settings)
+}
+
 pub fn write_system_settings(app: &AppHandle, settings: &SystemSettings) -> Result<(), String> {
-    let dir = resolve_config_dir(app)?;
+    let dir = resolve_system_config_dir(app)?;
     fs::create_dir_all(&dir).map_err(|e| format!("create config dir: {e}"))?;
     let path = dir.join(SYSTEM_CONFIG_FILE);
     let raw = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;

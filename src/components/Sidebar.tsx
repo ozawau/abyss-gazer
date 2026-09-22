@@ -1,15 +1,21 @@
 import type { NavItem, ViewId } from "../lib/nav";
+import {
+  formatPomodoroClock,
+  isPomodoroTiming,
+  pomodoroTimeMark,
+  type PomodoroTick,
+} from "../lib/pomodoroTimer";
 
 interface SidebarProps {
   items: NavItem[];
   activeView: ViewId;
   onNavigate: (id: ViewId) => void;
   selectedTaskTitle: string | null;
-  dbPath: string | null;
   /** Which views currently have their sub-nav open. */
   subNavOpen: Partial<Record<ViewId, boolean>>;
   onToggleSubNav: (id: ViewId) => void;
   onOpenSettings: () => void;
+  pomodoroTick?: PomodoroTick | null;
 }
 
 export function Sidebar({
@@ -17,10 +23,10 @@ export function Sidebar({
   activeView,
   onNavigate,
   selectedTaskTitle,
-  dbPath,
   subNavOpen,
   onToggleSubNav,
   onOpenSettings,
+  pomodoroTick = null,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
@@ -50,6 +56,23 @@ export function Sidebar({
                 title={item.enabled ? item.label : `${item.label}（即将推出）`}
               >
                 <span className="nav-label">{item.label}</span>
+                {item.id === "pomodoro" && isPomodoroTiming(pomodoroTick) && pomodoroTick && (
+                  <span
+                    className={`nav-timer is-${pomodoroTick.phase}${
+                      pomodoroTick.status === "paused" ? " is-paused" : ""
+                    }`}
+                  >
+                    <span className="nav-timer-mark" aria-hidden>
+                      {pomodoroTimeMark(
+                        pomodoroTick.phase,
+                        pomodoroTick.status === "paused",
+                      )}
+                    </span>
+                    <span className="nav-timer-clock">
+                      {formatPomodoroClock(pomodoroTick.remaining)}
+                    </span>
+                  </span>
+                )}
                 {!item.enabled && <span className="nav-soon">Soon</span>}
               </button>
               {item.hasSubNav && item.enabled && (
@@ -79,12 +102,6 @@ export function Sidebar({
             {selectedTaskTitle ?? "未选择"}
           </span>
         </div>
-        {dbPath && (
-          <div className="db-path-chip" title={dbPath}>
-            <span className="chip-label">数据文件</span>
-            <span className="chip-value db-path-value">{dbPath}</span>
-          </div>
-        )}
         <button
           type="button"
           className="sidebar-settings-btn"

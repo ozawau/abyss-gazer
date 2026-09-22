@@ -5,6 +5,12 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:app:allow-default-window-icon",
+    "core:window:allow-set-title",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-badge-label",
     "opener:default",
     "dialog:default"
   ]

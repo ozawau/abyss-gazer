@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod system_config;
 
+use commands::tray::install_pomodoro_tray;
 use db::{get_db_path, init_db, DbState};
 use std::sync::Mutex;
 use tauri::Manager;
@@ -17,6 +18,7 @@ pub fn run() {
                 conn: Mutex::new(conn),
                 db_path: Mutex::new(db_path),
             });
+            install_pomodoro_tray(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -35,6 +37,7 @@ pub fn run() {
             commands::pomodoro::count_focus_sessions_since,
             commands::pomodoro::count_focus_sessions_total_since,
             commands::pomodoro::list_focus_counts_since,
+            commands::pomodoro::list_first_completed_focus_starts,
             commands::pomodoro::list_pomodoro_sessions_in_range,
             commands::settings::get_pomodoro_settings,
             commands::settings::set_pomodoro_settings,
@@ -46,6 +49,7 @@ pub fn run() {
             commands::sync::run_data_sync,
             commands::holidays::read_cn_holidays_cache,
             commands::holidays::write_cn_holidays_cache,
+            commands::tray::set_pomodoro_tray,
             get_db_path,
         ])
         .run(tauri::generate_context!())

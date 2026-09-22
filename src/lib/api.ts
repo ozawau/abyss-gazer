@@ -164,6 +164,15 @@ export function listFocusCountsSince(sinceMs: number): Promise<FocusCountRow[]> 
   return invoke("list_focus_counts_since", { sinceMs });
 }
 
+export interface FirstFocusStart {
+  task_id: string;
+  started_at: number;
+}
+
+export function listFirstCompletedFocusStarts(): Promise<FirstFocusStart[]> {
+  return invoke("list_first_completed_focus_starts");
+}
+
 export function listPomodoroSessionsInRange(
   startMs: number,
   endMs: number,
@@ -228,6 +237,7 @@ export interface SystemSettings {
   localBackupDir: string | null;
   gitCommitMessage: string;
   weekStartsOn: WeekStartsOn;
+  ganttActivityMode: "discrete" | "continuous";
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -238,6 +248,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   localBackupDir: null,
   gitCommitMessage: "chore: sync Abyss Gazer data",
   weekStartsOn: 1,
+  ganttActivityMode: "discrete",
 };
 
 export function getSystemSettings(): Promise<SystemSettings> {

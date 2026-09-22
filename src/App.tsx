@@ -1,20 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TasksSubNav } from "./components/TasksSubNav";
 import {
   DEFAULT_POMODORO_SETTINGS,
   DEFAULT_SYSTEM_SETTINGS,
-  getDbPath,
   getPomodoroSettings,
   getSystemSettings,
   listTasks,
   PomodoroSettings,
   runDataSync,
+  setSystemSettings as persistSystemSettings,
   SystemSettings,
   Task,
 } from "./lib/api";
 import { initCnHolidayData } from "./lib/cnHolidayData";
+import { type GanttActivityMode } from "./lib/gantt";
+import { syncPomodoroPresence } from "./lib/pomodoroPresence";
+import { type PomodoroTick } from "./lib/pomodoroTimer";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
 import type { TasksSubPage } from "./lib/tasksNav";
 import { CompletedTasksView } from "./views/CompletedTasksView";
@@ -35,8 +38,8 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [pomodoroTaskId, setPomodoroTaskId] = useState<string | null>(null);
   const [pomodoroTiming, setPomodoroTiming] = useState(false);
+  const [pomodoroTick, setPomodoroTick] = useState<PomodoroTick | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [dbPath, setDbPath] = useState<string | null>(null);
   const [pomodoroPlayToken, setPomodoroPlayToken] = useState(0);
   const [pomodoroFullscreen, setPomodoroFullscreen] = useState(false);
   const [tasksCategoryFilter, setTasksCategoryFilter] =
@@ -62,13 +65,6 @@ function App() {
       })
       .catch((err) => {
         if (!cancelled) setLoadError(String(err));
-      });
-    getDbPath()
-      .then((path) => {
-        if (!cancelled) setDbPath(path);
-      })
-      .catch(() => {
-        /* optional */
       });
     getPomodoroSettings()
       .then((settings) => {
@@ -137,9 +133,26 @@ function App() {
 
   const showTasksSubNav = activeView === "tasks" && !!subNavOpen.tasks;
 
+  const handlePomodoroTick = useCallback((tick: PomodoroTick) => {
+    setPomodoroTick(tick);
+    setPomodoroTiming(tick.status !== "idle");
+  }, []);
+
+  useEffect(() => {
+    void syncPomodoroPresence(pomodoroTick);
+  }, [pomodoroTick]);
+
+  useEffect(() => {
+    return () => {
+      void syncPomodoroPresence(null);
+    };
+  }, []);
+
   function handleSelectTask(id: string | null) {
     setSelectedTaskId(id);
-    if (!pomodoroTiming) {
+    const boundStillExists =
+      pomodoroTaskId != null && tasks.some((t) => t.id === pomodoroTaskId);
+    if (!pomodoroTiming || !boundStillExists) {
       setPomodoroTaskId(id);
     }
   }
@@ -169,8 +182,15 @@ function App() {
     setSystemSettings(next);
   }
 
-  async function handleDataPathChange(nextDbPath: string) {
-    setDbPath(nextDbPath);
+  function handleGanttActivityModeChange(mode: GanttActivityMode) {
+    const next = { ...systemSettings, ganttActivityMode: mode };
+    setSystemSettings(next);
+    void persistSystemSettings(next).then(setSystemSettings).catch((err) => {
+      setLoadError(String(err));
+    });
+  }
+
+  async function handleDataPathChange(_nextDbPath: string) {
     try {
       const rows = await listTasks();
       setTasks(rows);
@@ -196,10 +216,10 @@ function App() {
           selectedTaskTitle={
             pomodoroTask?.title ?? selectedTask?.title ?? null
           }
-          dbPath={dbPath}
           subNavOpen={subNavOpen}
           onToggleSubNav={handleToggleSubNav}
           onOpenSettings={() => setSettingsOpen(true)}
+          pomodoroTick={pomodoroTick}
         />
       )}
       {showTasksSubNav && !immersivePomodoro && (
@@ -234,6 +254,8 @@ function App() {
             onSelectTask={handleSelectTask}
             onStartPomodoro={startPomodoroForTask}
             weekStartsOn={systemSettings.weekStartsOn}
+            activityMode={systemSettings.ganttActivityMode}
+            onActivityModeChange={handleGanttActivityModeChange}
           />
         )}
         {activeView === "calendar" && (
@@ -260,6 +282,7 @@ function App() {
               setPomodoroFullscreen((v) => !v)
             }
             onTimingChange={setPomodoroTiming}
+            onTick={handlePomodoroTick}
             onSessionsChanged={() => {
               void listTasks()
                 .then(setTasks)
