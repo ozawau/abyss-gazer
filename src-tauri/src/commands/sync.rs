@@ -7,7 +7,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex as SyncGate;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, State};
+use tauri_plugin_autostart::ManagerExt;
 
 /// Only one sync runs at a time. A second request returns immediately.
 static SYNC_GATE: SyncGate<()> = SyncGate::new(());
@@ -130,9 +132,185 @@ fn disable_sync(app: &AppHandle) -> Result<(), String> {
     write_system_settings(app, &settings)
 }
 
+/// Register or remove the OS login item.
+/// macOS writes a LaunchAgent plist. Windows writes the current-user Run key,
+/// with the exe path quoted.
+pub fn apply_launch_at_login(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch
+            .enable()
+            .map_err(|e| format!("开启开机启动失败: {e}"))?;
+        #[cfg(target_os = "macos")]
+        set_macos_service_enabled(true);
+        #[cfg(windows)]
+        write_windows_run_value()?;
+        Ok(())
+    } else {
+        #[cfg(target_os = "macos")]
+        set_macos_service_enabled(false);
+        let current = autolaunch
+            .is_enabled()
+            .map_err(|e| format!("读取开机启动状态失败: {e}"))?;
+        if current {
+            autolaunch
+                .disable()
+                .map_err(|e| format!("关闭开机启动失败: {e}"))?;
+        }
+        Ok(())
+    }
+}
+
+const LAUNCH_AT_LOGIN_LABEL: &str = "Abyss Gazer";
+
+/// Live OS state. macOS checks the LaunchAgent plist and whether System
+/// Settings has disabled that service. Windows checks the Run key and the
+/// Task Manager startup switch. A failed lookup leaves the saved value alone.
+fn os_launch_at_login_enabled(app: &AppHandle) -> Result<bool, String> {
+    let registered = app
+        .autolaunch()
+        .is_enabled()
+        .map_err(|e| format!("读取开机启动状态失败: {e}"))?;
+    if !registered {
+        return Ok(false);
+    }
+    #[cfg(target_os = "macos")]
+    if macos_service_disabled() {
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_service_disabled() -> bool {
+    let Some(uid) = current_uid() else {
+        return false;
+    };
+    let domain = format!("gui/{uid}");
+    if let Some(output) = command_output(
+        Command::new("launchctl").args(["print-disabled", &domain]),
+        Duration::from_millis(800),
+    ) {
+        if output.status.success()
+            && service_marked_disabled(
+                &String::from_utf8_lossy(&output.stdout),
+                LAUNCH_AT_LOGIN_LABEL,
+            )
+        {
+            return true;
+        }
+    }
+    let target = format!("{domain}/{LAUNCH_AT_LOGIN_LABEL}");
+    if let Some(output) = command_output(
+        Command::new("launchctl").args(["print", &target]),
+        Duration::from_millis(800),
+    ) {
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if text.contains("state = disabled") {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_service_enabled(enabled: bool) {
+    let Some(uid) = current_uid() else {
+        return;
+    };
+    let action = if enabled { "enable" } else { "disable" };
+    let target = format!("gui/{uid}/{LAUNCH_AT_LOGIN_LABEL}");
+    let _ = command_output(
+        Command::new("launchctl").args([action, &target]),
+        Duration::from_millis(800),
+    );
+}
+
+#[cfg(target_os = "macos")]
+fn current_uid() -> Option<u32> {
+    let output = command_output(Command::new("id").arg("-u"), Duration::from_millis(500))?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .ok()
+}
+
+fn command_output(cmd: &mut Command, timeout: Duration) -> Option<std::process::Output> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) if started.elapsed() > timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => return None,
+        }
+    }
+}
+
+fn service_marked_disabled(text: &str, label: &str) -> bool {
+    let needle = format!("\"{label}\"");
+    for line in text.lines() {
+        if !line.contains(&needle) {
+            continue;
+        }
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("=> false") || lower.contains("=> enabled") {
+            return false;
+        }
+        if lower.contains("=> true") || lower.contains("=> disabled") {
+            return true;
+        }
+    }
+    false
+}
+
+/// The autostart plugin writes the exe path unquoted. Paths that contain spaces
+/// (this app's install directory does) are split by Windows, so rewrite the value.
+#[cfg(windows)]
+fn write_windows_run_value() -> Result<(), String> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+    use winreg::RegKey;
+
+    let exe = std::env::current_exe().map_err(|e| format!("读取程序路径失败: {e}"))?;
+    let command = format!("\"{}\"", exe.display());
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    hkcu.open_subkey_with_flags(
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+        KEY_SET_VALUE,
+    )
+    .map_err(|e| format!("打开启动项注册表失败: {e}"))?
+    .set_value("Abyss Gazer", &command)
+    .map_err(|e| format!("写入开机启动失败: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_system_settings(app: AppHandle) -> Result<SystemSettings, String> {
-    read_system_settings(&app)
+    let mut settings = read_system_settings(&app)?;
+    if let Ok(enabled) = os_launch_at_login_enabled(&app) {
+        if settings.launch_at_login != enabled {
+            settings.launch_at_login = enabled;
+            let _ = write_system_settings(&app, &settings);
+        }
+    }
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -146,11 +324,21 @@ pub fn get_active_data_dir(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn set_system_settings(
+pub async fn set_system_settings(
     app: AppHandle,
     settings: SystemSettings,
 ) -> Result<SystemSettings, String> {
     let normalized = normalize_system_settings(settings);
+    let previous = read_system_settings(&app)?;
+    if previous.launch_at_login != normalized.launch_at_login {
+        let enabled = normalized.launch_at_login;
+        let app_for_login = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            apply_launch_at_login(&app_for_login, enabled)
+        })
+        .await
+        .map_err(|e| format!("开机启动失败: {e}"))??;
+    }
     write_system_settings(&app, &normalized)?;
     Ok(normalized)
 }
@@ -234,4 +422,33 @@ pub async fn run_data_sync(app: AppHandle, db: State<'_, DbState>) -> Result<(),
         return Err(err);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::service_marked_disabled;
+
+    #[test]
+    fn disabled_launch_agent_lines() {
+        assert!(service_marked_disabled(
+            "disabled services = {\n\t\"Abyss Gazer\" => disabled\n}\n",
+            "Abyss Gazer",
+        ));
+        assert!(service_marked_disabled(
+            "\t\"Abyss Gazer\" => true\n",
+            "Abyss Gazer",
+        ));
+        assert!(!service_marked_disabled(
+            "\t\"Abyss Gazer\" => false\n",
+            "Abyss Gazer",
+        ));
+        assert!(!service_marked_disabled(
+            "\t\"Abyss Gazer\" => enabled\n",
+            "Abyss Gazer",
+        ));
+        assert!(!service_marked_disabled(
+            "\t\"com.example.Abyss Gazer Helper\" => disabled\n",
+            "Abyss Gazer",
+        ));
+    }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Category,
   listCategories,
@@ -9,12 +9,16 @@ import {
   TaskPriority,
 } from "../lib/api";
 import {
+  addDays,
   addMonths,
   startOfLocalDay,
   type WeekStartsOn,
 } from "../lib/calendar";
 import {
+  buildGanttDayRange,
   buildGanttRange,
+  daysBetween,
+  formatGanttSpan,
   formatGanttTitle,
   ganttActivityMarks,
   ganttBarLayout,
@@ -24,7 +28,6 @@ import {
   ganttRangeQueryMs,
   ganttTaskColor,
   sortGanttParentRows,
-  startOfQuarter,
   taskVisibleOnGantt,
   todayOffsetPx,
   type GanttActivityMode,
@@ -42,6 +45,8 @@ interface GanttViewProps {
   weekStartsOn: WeekStartsOn;
   activityMode: GanttActivityMode;
   onActivityModeChange: (mode: GanttActivityMode) => void;
+  categoryFilter: string;
+  onCategoryFilterChange: (filter: string) => void;
 }
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -64,12 +69,16 @@ export function GanttView({
   weekStartsOn,
   activityMode,
   onActivityModeChange,
+  categoryFilter,
+  onCategoryFilterChange,
 }: GanttViewProps) {
   const today = useMemo(() => startOfLocalDay(new Date()), []);
-  const [scale, setScale] = useState<GanttScale>("month");
+  const [scale, setScale] = useState<GanttScale | null>("month");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
+  const [customRange, setCustomRange] = useState<{ start: Date; end: Date } | null>(
+    null,
+  );
   const [categories, setCategories] = useState<Category[]>([]);
-  const [categoryFilter, setCategoryFilter] = useState("all");
   const [hideDone, setHideDone] = useState(false);
   const [sessions, setSessions] = useState<PomodoroSession[]>([]);
   const [firstFocusStarts, setFirstFocusStarts] = useState<
@@ -82,7 +91,8 @@ export function GanttView({
     x: number;
     y: number;
   } | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [timelineWidth, setTimelineWidth] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,10 +114,18 @@ export function GanttView({
     return map;
   }, [categories]);
 
-  const range = useMemo(
-    () => buildGanttRange(scale, cursor, weekStartsOn),
-    [scale, cursor, weekStartsOn],
-  );
+  const baseRange = useMemo(() => {
+    if (scale == null && customRange) {
+      return buildGanttDayRange(customRange.start, customRange.end);
+    }
+    return buildGanttRange(scale ?? "month", cursor, weekStartsOn);
+  }, [scale, cursor, weekStartsOn, customRange]);
+
+  const range = useMemo(() => {
+    const count = Math.max(baseRange.columns.length, 1);
+    if (timelineWidth <= 0) return baseRange;
+    return { ...baseRange, columnWidth: timelineWidth / count };
+  }, [baseRange, timelineWidth]);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,7 +147,7 @@ export function GanttView({
 
   useEffect(() => {
     let cancelled = false;
-    const { startMs, endMs } = ganttRangeQueryMs(range);
+    const { startMs, endMs } = ganttRangeQueryMs(baseRange);
     listPomodoroSessionsInRange(startMs, endMs)
       .then((rows) => {
         if (!cancelled) setSessions(rows);
@@ -140,7 +158,7 @@ export function GanttView({
     return () => {
       cancelled = true;
     };
-  }, [range]);
+  }, [baseRange]);
 
   const sessionTaskIds = useMemo(
     () => new Set(sessions.map((session) => session.task_id)),
@@ -210,38 +228,72 @@ export function GanttView({
     [range, today],
   );
 
-  const timelineWidth = range.columns.length * range.columnWidth;
-  const title = formatGanttTitle(scale, range, cursor);
+  const title =
+    scale == null ? formatGanttSpan(range) : formatGanttTitle(scale, range, cursor);
   const emptyMessage = "当前时间范围内没有排期、专注或完成的任务。";
 
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    if (todayLeft == null) {
-      el.scrollLeft = 0;
-      return;
-    }
-    el.scrollLeft = Math.max(0, todayLeft - el.clientWidth * 0.28);
-  }, [todayLeft, scale, range.start]);
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    if (!board) return;
+    const measure = () => {
+      const head = board.querySelector(".gantt-head");
+      const width = head instanceof HTMLElement ? head.clientWidth : 0;
+      if (width <= 0) return;
+      setTimelineWidth((prev) => (prev === width ? prev : width));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(board);
+    return () => observer.disconnect();
+  }, [baseRange.columns.length]);
+
+  function applyCustom(start: Date, end: Date) {
+    const from = startOfLocalDay(start);
+    const to = startOfLocalDay(end);
+    setScale(null);
+    setCustomRange(
+      from <= to ? { start: from, end: to } : { start: to, end: from },
+    );
+  }
 
   function goToday() {
-    setCursor(startOfLocalDay(new Date()));
+    const now = startOfLocalDay(new Date());
+    if (scale == null) {
+      const span = daysBetween(range.start, range.end);
+      applyCustom(addDays(now, -span), now);
+      return;
+    }
+    setCursor(now);
   }
 
   function goPrev() {
-    if (scale === "week") setCursor((d) => addDaysSafe(d, -14));
+    if (scale == null) {
+      const span = daysBetween(range.start, range.end) + 1;
+      applyCustom(addDays(range.start, -span), addDays(range.end, -span));
+      return;
+    }
+    if (scale === "week") setCursor((d) => addDays(d, -14));
     else if (scale === "quarter") setCursor((d) => addMonths(d, -3));
     else setCursor((d) => addMonths(d, -1));
   }
 
   function goNext() {
-    if (scale === "week") setCursor((d) => addDaysSafe(d, 14));
+    if (scale == null) {
+      const span = daysBetween(range.start, range.end) + 1;
+      applyCustom(addDays(range.start, span), addDays(range.end, span));
+      return;
+    }
+    if (scale === "week") setCursor((d) => addDays(d, 14));
     else if (scale === "quarter") setCursor((d) => addMonths(d, 3));
     else setCursor((d) => addMonths(d, 1));
   }
 
-  function jumpTo(day: Date) {
-    setCursor(startOfLocalDay(day));
+  function setRangeBound(which: "start" | "end", value: string) {
+    const day = parseDateInput(value);
+    if (!day) return;
+    const start = which === "start" ? day : range.start;
+    const end = which === "end" ? day : range.end;
+    applyCustom(start, end);
   }
 
   return (
@@ -260,7 +312,10 @@ export function GanttView({
                 role="tab"
                 aria-selected={scale === tab.id}
                 className={`calendar-mode-tab${scale === tab.id ? " is-active" : ""}`}
-                onClick={() => setScale(tab.id)}
+                onClick={() => {
+                  if (scale == null) setCursor(startOfLocalDay(range.start));
+                  setScale(tab.id);
+                }}
               >
                 {tab.label}
               </button>
@@ -283,12 +338,29 @@ export function GanttView({
       <div className="calendar-filters gantt-filters">
         <div className="gantt-filters-main">
           <strong className="calendar-period-title">{title}</strong>
-          <GanttJump scale={scale} cursor={cursor} onJump={jumpTo} />
+          <label className="calendar-jump-field">
+            <span>开始</span>
+            <input
+              type="date"
+              className="calendar-jump-input calendar-jump-input-date"
+              value={toDateInput(range.start)}
+              onChange={(e) => setRangeBound("start", e.target.value)}
+            />
+          </label>
+          <label className="calendar-jump-field">
+            <span>结束</span>
+            <input
+              type="date"
+              className="calendar-jump-input calendar-jump-input-date"
+              value={toDateInput(range.end)}
+              onChange={(e) => setRangeBound("end", e.target.value)}
+            />
+          </label>
           <label className="calendar-filter-field">
             <span>分类</span>
             <select
               value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
+              onChange={(e) => onCategoryFilterChange(e.target.value)}
             >
               <option value="all">全部</option>
               <option value="none">未分类</option>
@@ -336,20 +408,12 @@ export function GanttView({
         <p className="gantt-empty">{emptyMessage}</p>
       )}
 
-      <div className="gantt-board">
-        <div className="gantt-scroll" ref={scrollRef}>
-          <div
-            className="gantt-grid"
-            style={{
-              width: `calc(var(--gantt-name-col) + ${timelineWidth}px)`,
-            }}
-          >
+      <div className="gantt-board" ref={boardRef}>
+        <div className="gantt-scroll">
+          <div className="gantt-grid">
             <div className="gantt-header-row">
               <div className="gantt-corner" />
-              <div
-                className="gantt-head"
-                style={{ width: `${timelineWidth}px` }}
-              >
+              <div className="gantt-head">
                 {range.columns.map((col) => (
                   <div
                     key={col.key}
@@ -358,7 +422,6 @@ export function GanttView({
                         ? " is-today"
                         : ""
                     }`}
-                    style={{ width: range.columnWidth }}
                   >
                     <span>{col.label}</span>
                     {col.sublabel && <em>{col.sublabel}</em>}
@@ -378,7 +441,6 @@ export function GanttView({
                   sessions={sessions}
                   categoryMap={categoryMap}
                   selectedTaskId={selectedTaskId}
-                  timelineWidth={timelineWidth}
                   todayLeft={todayLeft}
                   onSelectTask={onSelectTask}
                   onStartPomodoro={onStartPomodoro}
@@ -388,13 +450,9 @@ export function GanttView({
               {visibleRows.length === 0 && (
                 <div className="gantt-row gantt-row-fill">
                   <div className="gantt-name-cell" />
-                  <div
-                    className="gantt-track"
-                    style={{ width: `${timelineWidth}px` }}
-                  >
+                  <div className="gantt-track">
                     <GanttTrackBg
                       columns={range.columns}
-                      columnWidth={range.columnWidth}
                       todayLeft={todayLeft}
                     />
                   </div>
@@ -430,7 +488,6 @@ function GanttParentRowView({
   sessions,
   categoryMap,
   selectedTaskId,
-  timelineWidth,
   todayLeft,
   onSelectTask,
   onStartPomodoro,
@@ -444,7 +501,6 @@ function GanttParentRowView({
   sessions: PomodoroSession[];
   categoryMap: Map<string, Category>;
   selectedTaskId: string | null;
-  timelineWidth: number;
   todayLeft: number | null;
   onSelectTask: (id: string | null) => void;
   onStartPomodoro: (taskId: string) => void;
@@ -525,15 +581,11 @@ function GanttParentRowView({
       </div>
       <div
         className="gantt-track"
-        style={{
-          width: `${timelineWidth}px`,
-          minHeight: `${laneCount * 2.15}rem`,
-        }}
+        style={{ minHeight: `${laneCount * 2.15}rem` }}
         onClick={() => onSelectTask(parent.id)}
       >
         <GanttTrackBg
           columns={range.columns}
-          columnWidth={range.columnWidth}
           todayLeft={todayLeft}
         />
         {lanes.map((lane, index) => {
@@ -685,11 +737,9 @@ function GanttTaskHover({
 
 function GanttTrackBg({
   columns,
-  columnWidth,
   todayLeft,
 }: {
   columns: GanttColumn[];
-  columnWidth: number;
   todayLeft: number | null;
 }) {
   return (
@@ -698,7 +748,6 @@ function GanttTrackBg({
         <span
           key={col.key}
           className={`gantt-col${col.isWeekend ? " is-weekend" : ""}`}
-          style={{ width: columnWidth }}
         />
       ))}
       {todayLeft != null && (
@@ -712,175 +761,26 @@ function GanttTrackBg({
   );
 }
 
-function addDaysSafe(date: Date, days: number): Date {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return startOfLocalDay(d);
-}
-
-function GanttJump({
-  scale,
-  cursor,
-  onJump,
-}: {
-  scale: GanttScale;
-  cursor: Date;
-  onJump: (day: Date) => void;
-}) {
-  const [yearText, setYearText] = useState(() => String(cursor.getFullYear()));
-  const [monthText, setMonthText] = useState(() =>
-    String(cursor.getMonth() + 1),
-  );
-  const [dateText, setDateText] = useState(() => toDateInput(cursor));
-  const [quarter, setQuarter] = useState(
-    () => Math.floor(cursor.getMonth() / 3) + 1,
-  );
-
-  useEffect(() => {
-    setYearText(String(cursor.getFullYear()));
-    setMonthText(String(cursor.getMonth() + 1));
-    setDateText(toDateInput(cursor));
-    setQuarter(Math.floor(cursor.getMonth() / 3) + 1);
-  }, [cursor, scale]);
-
-  function commitMonth() {
-    const y = Number.parseInt(yearText, 10);
-    const m = Number.parseInt(monthText, 10);
-    if (
-      !Number.isFinite(y) ||
-      y < 1970 ||
-      y > 2100 ||
-      !Number.isFinite(m) ||
-      m < 1 ||
-      m > 12
-    ) {
-      setYearText(String(cursor.getFullYear()));
-      setMonthText(String(cursor.getMonth() + 1));
-      return;
-    }
-    onJump(new Date(y, m - 1, 1));
-  }
-
-  function commitQuarter() {
-    const y = Number.parseInt(yearText, 10);
-    if (!Number.isFinite(y) || y < 1970 || y > 2100) {
-      setYearText(String(cursor.getFullYear()));
-      return;
-    }
-    onJump(startOfQuarter(new Date(y, (quarter - 1) * 3, 1)));
-  }
-
-  function commitDate() {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText.trim());
-    if (!match) {
-      setDateText(toDateInput(cursor));
-      return;
-    }
-    const y = Number(match[1]);
-    const m = Number(match[2]);
-    const d = Number(match[3]);
-    const parsed = new Date(y, m - 1, d);
-    if (
-      parsed.getFullYear() !== y ||
-      parsed.getMonth() !== m - 1 ||
-      parsed.getDate() !== d
-    ) {
-      setDateText(toDateInput(cursor));
-      return;
-    }
-    onJump(parsed);
-  }
-
-  if (scale === "week") {
-    return (
-      <label className="calendar-jump-field">
-        <span>跳转</span>
-        <input
-          type="date"
-          className="calendar-jump-input calendar-jump-input-date"
-          value={dateText}
-          onChange={(e) => setDateText(e.target.value)}
-          onBlur={() => commitDate()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitDate();
-          }}
-        />
-      </label>
-    );
-  }
-
-  if (scale === "quarter") {
-    return (
-      <div className="calendar-jump-field calendar-jump-field-row">
-        <span>跳转</span>
-        <input
-          type="number"
-          className="calendar-jump-input calendar-jump-input-year"
-          min={1970}
-          max={2100}
-          value={yearText}
-          onChange={(e) => setYearText(e.target.value)}
-          onBlur={() => commitQuarter()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitQuarter();
-          }}
-        />
-        <span className="calendar-jump-suffix">年</span>
-        <select
-          className="settings-select"
-          value={quarter}
-          onChange={(e) => {
-            const q = Number(e.target.value);
-            setQuarter(q);
-            const y = Number.parseInt(yearText, 10);
-            if (Number.isFinite(y)) onJump(new Date(y, (q - 1) * 3, 1));
-          }}
-        >
-          <option value={1}>第1季度</option>
-          <option value={2}>第2季度</option>
-          <option value={3}>第3季度</option>
-          <option value={4}>第4季度</option>
-        </select>
-      </div>
-    );
-  }
-
-  return (
-    <div className="calendar-jump-field calendar-jump-field-row">
-      <span>跳转</span>
-      <input
-        type="number"
-        className="calendar-jump-input calendar-jump-input-year"
-        min={1970}
-        max={2100}
-        value={yearText}
-        onChange={(e) => setYearText(e.target.value)}
-        onBlur={() => commitMonth()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commitMonth();
-        }}
-      />
-      <span className="calendar-jump-suffix">年</span>
-      <input
-        type="number"
-        className="calendar-jump-input calendar-jump-input-month"
-        min={1}
-        max={12}
-        value={monthText}
-        onChange={(e) => setMonthText(e.target.value)}
-        onBlur={() => commitMonth()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commitMonth();
-        }}
-      />
-      <span className="calendar-jump-suffix">月</span>
-    </div>
-  );
-}
-
 function toDateInput(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+function parseDateInput(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  const parsed = new Date(y, m - 1, d);
+  if (
+    parsed.getFullYear() !== y ||
+    parsed.getMonth() !== m - 1 ||
+    parsed.getDate() !== d
+  ) {
+    return null;
+  }
+  return startOfLocalDay(parsed);
 }

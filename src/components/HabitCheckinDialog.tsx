@@ -10,6 +10,7 @@ interface HabitCheckinDialogProps {
   initialChecked: boolean;
   initialNote: string;
   initialSelected: string[];
+  recordedIds: string[];
   checkedByClock: boolean;
   busy: boolean;
   onCancel: () => void;
@@ -23,6 +24,7 @@ export function HabitCheckinDialog({
   initialChecked,
   initialNote,
   initialSelected,
+  recordedIds,
   checkedByClock,
   busy,
   onCancel,
@@ -51,10 +53,17 @@ export function HabitCheckinDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [habit, busy, onCancel]);
 
+  const recordedToken = recordedIds.join("\n");
+  const recorded = useMemo(() => new Set(recordedIds), [recordedToken]);
+
   const tree = useMemo(() => {
     if (!habit) return [];
-    return flattenTaskTree(tasks, new Set(), [habit]);
-  }, [habit, tasks]);
+    return flattenTaskTree(tasks, new Set(), [habit]).filter((node) => {
+      if (node.task.id === habit.id) return true;
+      if (node.task.status !== "done") return true;
+      return recorded.has(node.task.id);
+    });
+  }, [habit, tasks, recorded]);
   const hasChildren = tree.some((node) => node.task.id !== habit?.id);
 
   if (!habit || !day) return null;
@@ -129,10 +138,12 @@ export function HabitCheckinDialog({
               <div className="field">
                 <span>任务</span>
                 <ul className="habit-checkin-tree">
-                  {tree.map((node) => (
+                  {tree.map((node) => {
+                    const done = node.task.id !== habit.id && node.task.status === "done";
+                    return (
                     <li key={node.task.id}>
                       <label
-                        className="habit-checkin-node"
+                        className={`habit-checkin-node${done ? " is-done" : ""}`}
                         style={{ paddingLeft: `${node.depth * 1.1}rem` }}
                       >
                         <input
@@ -144,7 +155,8 @@ export function HabitCheckinDialog({
                         <span>{node.task.title}</span>
                       </label>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </div>
             )}

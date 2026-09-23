@@ -97,6 +97,30 @@ export function SettingsDialog({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    function refreshLaunchAtLogin() {
+      void getSystemSettings()
+        .then((saved) => {
+          if (cancelled) return;
+          setSystem((prev) =>
+            prev.launchAtLogin === saved.launchAtLogin
+              ? prev
+              : { ...prev, launchAtLogin: saved.launchAtLogin },
+          );
+        })
+        .catch(() => {
+          /* keep the switch as it is */
+        });
+    }
+    window.addEventListener("focus", refreshLaunchAtLogin);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refreshLaunchAtLogin);
+    };
+  }, [open]);
+
   if (!open) return null;
 
   async function persistPomodoro(next: PomodoroSettings) {
@@ -124,6 +148,7 @@ export function SettingsDialog({
       setSystem(saved);
       onSystemSettingsChange(saved);
     } catch (err) {
+      setSystem(system);
       setError(String(err));
     } finally {
       setBusy(false);
@@ -588,8 +613,20 @@ export function SettingsDialog({
               <div className="settings-panel">
                 <header className="settings-panel-header">
                   <h3>系统设置</h3>
-                  <p>管理数据目录与同步备份。</p>
+                  <p>管理开机启动、数据目录与同步备份。</p>
                 </header>
+
+                <div className="settings-row">
+                  <span className="settings-row-label">开机启动</span>
+                  <ToggleSwitch
+                    label="开机启动"
+                    checked={system.launchAtLogin}
+                    disabled={busy}
+                    onChange={(checked) =>
+                      patchSystem({ launchAtLogin: checked })
+                    }
+                  />
+                </div>
 
                 <div className="settings-row settings-row-stack">
                   <span className="settings-row-label">数据文件目录</span>

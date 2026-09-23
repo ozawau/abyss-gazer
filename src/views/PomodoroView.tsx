@@ -436,14 +436,14 @@ export function PomodoroView({
             {status !== "running" ? (
               <button
                 type="button"
-                className="primary-btn"
+                className={`primary-btn${status === "paused" ? " is-resume" : ""}`}
                 onClick={start}
                 disabled={!selectedTask}
               >
                 {status === "paused" ? "继续" : "开始"}
               </button>
             ) : (
-              <button type="button" className="primary-btn" onClick={pause}>
+              <button type="button" className="primary-btn is-pause" onClick={pause}>
                 暂停
               </button>
             )}

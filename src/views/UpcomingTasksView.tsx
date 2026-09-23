@@ -18,6 +18,8 @@ const PAGE_SIZE = 15;
 interface UpcomingTasksViewProps {
   tasks: Task[];
   onTasksChange: (tasks: Task[]) => void;
+  categoryFilter: string;
+  onCategoryFilterChange: (filter: string) => void;
 }
 
 function startOfDayMs(ymd: string): number | null {
@@ -48,10 +50,11 @@ function formatDateTime(ms: number | null | undefined): string {
 export function UpcomingTasksView({
   tasks,
   onTasksChange,
+  categoryFilter,
+  onCategoryFilterChange,
 }: UpcomingTasksViewProps) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [titleQuery, setTitleQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [startFrom, setStartFrom] = useState("");
   const [startTo, setStartTo] = useState("");
   const [createdFrom, setCreatedFrom] = useState("");
@@ -197,7 +200,7 @@ export function UpcomingTasksView({
 
   function clearFilters() {
     setTitleQuery("");
-    setCategoryFilter("all");
+    onCategoryFilterChange("all");
     setStartFrom("");
     setStartTo("");
     setCreatedFrom("");
@@ -224,7 +227,7 @@ export function UpcomingTasksView({
           <span>分类</span>
           <select
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            onChange={(e) => onCategoryFilterChange(e.target.value)}
           >
             <option value="all">全部</option>
             <option value="none">未分类</option>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TasksSubNav } from "./components/TasksSubNav";
@@ -30,9 +30,33 @@ import { CategoryFilter, TasksView } from "./views/TasksView";
 import { UpcomingTasksView } from "./views/UpcomingTasksView";
 import "./styles/app.css";
 
+function ViewSlot({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={active ? "view-slot" : "view-slot is-hidden"}
+      aria-hidden={!active}
+      inert={!active}
+    >
+      {children}
+    </div>
+  );
+}
+
 function App() {
   const [activeView, setActiveView] = useState<ViewId>("checkin");
   const [tasksSubPage, setTasksSubPage] = useState<TasksSubPage>("active");
+  const [mountedViews, setMountedViews] = useState<ReadonlySet<ViewId>>(
+    () => new Set<ViewId>(["checkin"]),
+  );
+  const [mountedTaskPages, setMountedTaskPages] = useState<
+    ReadonlySet<TasksSubPage>
+  >(() => new Set<TasksSubPage>());
   const [subNavOpen, setSubNavOpen] = useState<Partial<Record<ViewId, boolean>>>(
     {},
   );
@@ -45,6 +69,14 @@ function App() {
   const [pomodoroPlayToken, setPomodoroPlayToken] = useState(0);
   const [pomodoroFullscreen, setPomodoroFullscreen] = useState(false);
   const [tasksCategoryFilter, setTasksCategoryFilter] =
+    useState<CategoryFilter>("all");
+  const [upcomingCategoryFilter, setUpcomingCategoryFilter] =
+    useState<CategoryFilter>("all");
+  const [completedCategoryFilter, setCompletedCategoryFilter] =
+    useState<CategoryFilter>("all");
+  const [ganttCategoryFilter, setGanttCategoryFilter] =
+    useState<CategoryFilter>("all");
+  const [calendarCategoryFilter, setCalendarCategoryFilter] =
     useState<CategoryFilter>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings>(
@@ -166,6 +198,16 @@ function App() {
     }
   }
 
+  function rememberView(id: ViewId) {
+    setMountedViews((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }
+
+  function rememberTaskPage(page: TasksSubPage) {
+    setMountedTaskPages((prev) =>
+      prev.has(page) ? prev : new Set(prev).add(page),
+    );
+  }
+
   function startPomodoroForTask(taskId: string) {
     setSelectedTaskId(taskId);
     setPomodoroTaskId(taskId);
@@ -175,8 +217,17 @@ function App() {
 
   function handleNavigate(id: ViewId) {
     setActiveView(id);
-    if (id === "tasks") setTasksSubPage("active");
+    rememberView(id);
+    if (id === "tasks") {
+      setTasksSubPage("active");
+      rememberTaskPage("active");
+    }
     if (id !== "pomodoro") setPomodoroFullscreen(false);
+  }
+
+  function handleTasksSubPage(page: TasksSubPage) {
+    setTasksSubPage(page);
+    rememberTaskPage(page);
   }
 
   function handleToggleSubNav(id: ViewId) {
@@ -232,59 +283,90 @@ function App() {
       {showTasksSubNav && !immersivePomodoro && (
         <TasksSubNav
           activePage={tasksSubPage}
-          onNavigate={setTasksSubPage}
+          onNavigate={handleTasksSubPage}
         />
       )}
       <main className={`main${immersivePomodoro ? " is-immersive" : ""}`}>
         {loadError && <p className="error-banner">{loadError}</p>}
-        {activeView === "tasks" && tasksSubPage === "active" && (
-          <TasksView
-            tasks={tasks}
-            selectedTaskId={selectedTaskId}
-            onSelectTask={handleSelectTask}
-            onTasksChange={setTasks}
-            onStartPomodoro={startPomodoroForTask}
-            categoryFilter={tasksCategoryFilter}
-            onCategoryFilterChange={setTasksCategoryFilter}
-          />
+        {mountedTaskPages.has("active") && (
+          <ViewSlot active={activeView === "tasks" && tasksSubPage === "active"}>
+            <TasksView
+              tasks={tasks}
+              selectedTaskId={selectedTaskId}
+              onSelectTask={handleSelectTask}
+              onTasksChange={setTasks}
+              onStartPomodoro={startPomodoroForTask}
+              categoryFilter={tasksCategoryFilter}
+              onCategoryFilterChange={setTasksCategoryFilter}
+            />
+          </ViewSlot>
         )}
-        {activeView === "tasks" && tasksSubPage === "upcoming" && (
-          <UpcomingTasksView tasks={tasks} onTasksChange={setTasks} />
+        {mountedTaskPages.has("upcoming") && (
+          <ViewSlot
+            active={activeView === "tasks" && tasksSubPage === "upcoming"}
+          >
+            <UpcomingTasksView
+              tasks={tasks}
+              onTasksChange={setTasks}
+              categoryFilter={upcomingCategoryFilter}
+              onCategoryFilterChange={setUpcomingCategoryFilter}
+            />
+          </ViewSlot>
         )}
-        {activeView === "tasks" && tasksSubPage === "completed" && (
-          <CompletedTasksView tasks={tasks} onTasksChange={setTasks} />
+        {mountedTaskPages.has("completed") && (
+          <ViewSlot
+            active={activeView === "tasks" && tasksSubPage === "completed"}
+          >
+            <CompletedTasksView
+              tasks={tasks}
+              onTasksChange={setTasks}
+              categoryFilter={completedCategoryFilter}
+              onCategoryFilterChange={setCompletedCategoryFilter}
+            />
+          </ViewSlot>
         )}
-        {activeView === "gantt" && (
-          <GanttView
-            tasks={tasks}
-            selectedTaskId={selectedTaskId}
-            onSelectTask={handleSelectTask}
-            onStartPomodoro={startPomodoroForTask}
-            weekStartsOn={systemSettings.weekStartsOn}
-            activityMode={systemSettings.ganttActivityMode}
-            onActivityModeChange={handleGanttActivityModeChange}
-          />
+        {mountedViews.has("gantt") && (
+          <ViewSlot active={activeView === "gantt"}>
+            <GanttView
+              tasks={tasks}
+              selectedTaskId={selectedTaskId}
+              onSelectTask={handleSelectTask}
+              onStartPomodoro={startPomodoroForTask}
+              weekStartsOn={systemSettings.weekStartsOn}
+              activityMode={systemSettings.ganttActivityMode}
+              onActivityModeChange={handleGanttActivityModeChange}
+              categoryFilter={ganttCategoryFilter}
+              onCategoryFilterChange={setGanttCategoryFilter}
+            />
+          </ViewSlot>
         )}
-        {activeView === "calendar" && (
-          <CalendarView
-            tasks={tasks}
-            selectedTaskId={selectedTaskId}
-            onSelectTask={handleSelectTask}
-            onStartPomodoro={startPomodoroForTask}
-            weekStartsOn={systemSettings.weekStartsOn}
-          />
+        {mountedViews.has("calendar") && (
+          <ViewSlot active={activeView === "calendar"}>
+            <CalendarView
+              tasks={tasks}
+              selectedTaskId={selectedTaskId}
+              onSelectTask={handleSelectTask}
+              onStartPomodoro={startPomodoroForTask}
+              weekStartsOn={systemSettings.weekStartsOn}
+              categoryFilter={calendarCategoryFilter}
+              onCategoryFilterChange={setCalendarCategoryFilter}
+            />
+          </ViewSlot>
         )}
-        {activeView === "checkin" && (
-          <CheckinView
-            tasks={tasks}
-            weekStartsOn={systemSettings.weekStartsOn}
-          />
+        {mountedViews.has("checkin") && (
+          <ViewSlot active={activeView === "checkin"}>
+            <CheckinView
+              tasks={tasks}
+              weekStartsOn={systemSettings.weekStartsOn}
+            />
+          </ViewSlot>
         )}
         <div
           className={
             activeView === "pomodoro" ? "view-slot" : "view-slot is-hidden"
           }
           aria-hidden={activeView !== "pomodoro"}
+          inert={activeView !== "pomodoro"}
         >
           <PomodoroView
             tasks={tasks}

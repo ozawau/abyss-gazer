@@ -33,6 +33,9 @@ pub struct SystemSettings {
     pub week_starts_on: u8,
     #[serde(default = "default_gantt_activity_mode")]
     pub gantt_activity_mode: String,
+    /// Open the app when the user logs in. Applied via the OS login item.
+    #[serde(default)]
+    pub launch_at_login: bool,
 }
 
 fn default_week_starts_on() -> u8 {
@@ -54,6 +57,7 @@ impl Default for SystemSettings {
             git_commit_message: "chore: sync Abyss Gazer data".into(),
             week_starts_on: default_week_starts_on(),
             gantt_activity_mode: default_gantt_activity_mode(),
+            launch_at_login: false,
         }
     }
 }
@@ -107,6 +111,7 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
         git_commit_message,
         week_starts_on: normalize_week_starts_on(settings.week_starts_on),
         gantt_activity_mode: normalize_gantt_activity_mode(&settings.gantt_activity_mode),
+        launch_at_login: settings.launch_at_login,
     }
 }
 

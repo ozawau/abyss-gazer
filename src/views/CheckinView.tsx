@@ -388,10 +388,16 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
 
   function selectionFor(habit: Task, day: Date): string[] {
     const saved = details.get(checkinKey(habit.id, dayKey(day)))?.taskIds ?? [];
+    const savedSet = new Set(saved);
+    const byId = new Map(tasks.map((task) => [task.id, task]));
     const seen = new Set<string>();
     const ids: string[] = [];
     for (const id of [...clockTaskIds(habit, day), ...saved]) {
       if (seen.has(id)) continue;
+      const task = byId.get(id);
+      if (task && task.id !== habit.id && task.status === "done" && !savedSet.has(id)) {
+        continue;
+      }
       seen.add(id);
       ids.push(id);
     }
@@ -592,6 +598,11 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
             : ""
         }
         initialSelected={editor ? selectionFor(editor.habit, editor.day) : []}
+        recordedIds={
+          editor
+            ? (details.get(checkinKey(editor.habit.id, dayKey(editor.day)))?.taskIds ?? [])
+            : []
+        }
         busy={saving}
         onCancel={() => {
           if (!saving) setEditor(null);

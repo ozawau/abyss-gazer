@@ -1806,6 +1806,22 @@ body.is-task-dragging * {
   font-size: clamp(0.82rem, 1.6vw, 0.95rem);
 }
 
+.timer-controls .primary-btn.is-pause {
+  background: #d97706;
+}
+
+.timer-controls .primary-btn.is-pause:hover:not(:disabled) {
+  background: #b45309;
+}
+
+.timer-controls .primary-btn.is-resume {
+  background: #16a34a;
+}
+
+.timer-controls .primary-btn.is-resume:hover:not(:disabled) {
+  background: #15803d;
+}
+
 /* Settings dialog */
 .settings-dialog {
   width: min(720px, 100%);
@@ -3019,14 +3035,16 @@ body.is-task-dragging * {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .gantt-grid {
   display: flex;
   flex: 1;
   flex-direction: column;
-  min-width: 100%;
+  width: 100%;
+  min-width: 0;
   min-height: 100%;
 }
 
@@ -3051,7 +3069,8 @@ body.is-task-dragging * {
 
 .gantt-head {
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   height: 2.6rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
@@ -3062,12 +3081,23 @@ body.is-task-dragging * {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
   box-sizing: border-box;
   border-right: 1px solid rgba(197, 208, 222, 0.55);
   color: var(--text-muted);
   font-size: 0.68rem;
   line-height: 1.15;
+}
+
+.gantt-head-cell span,
+.gantt-head-cell em {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gantt-head-cell em {
@@ -3225,12 +3255,15 @@ body.is-task-dragging * {
 .gantt-track {
   position: relative;
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 2.35rem;
 }
 
 .gantt-col {
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
   box-sizing: border-box;
   border-right: 1px solid rgba(197, 208, 222, 0.4);
 }
@@ -3383,6 +3416,11 @@ body.is-task-dragging * {
 
 .habit-checkin-node span {
   min-width: 0;
+}
+
+.habit-checkin-node.is-done span {
+  color: var(--text-muted);
+  text-decoration: line-through;
 }
 
 .habit-checkin-clock {

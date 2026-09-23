@@ -7,11 +7,23 @@ use db::{get_db_path, init_db, DbState};
 use std::sync::Mutex;
 use tauri::Manager;
 
+fn autostart_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    let mut builder = tauri_plugin_autostart::Builder::new().app_name("Abyss Gazer");
+    #[cfg(target_os = "macos")]
+    {
+        // A LaunchAgent plist is a file write. AppleScript login items go
+        // through System Events and stall the UI for several seconds.
+        builder = builder.macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
+    }
+    builder.build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(autostart_plugin())
         .setup(|app| {
             let (conn, db_path) = init_db(app.handle())?;
             app.manage(DbState {

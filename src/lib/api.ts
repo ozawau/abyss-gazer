@@ -301,6 +301,7 @@ export interface SystemSettings {
   gitCommitMessage: string;
   weekStartsOn: WeekStartsOn;
   ganttActivityMode: "discrete" | "continuous";
+  launchAtLogin: boolean;
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -312,6 +313,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   gitCommitMessage: "chore: sync Abyss Gazer data",
   weekStartsOn: 1,
   ganttActivityMode: "discrete",
+  launchAtLogin: false,
 };
 
 export function getSystemSettings(): Promise<SystemSettings> {

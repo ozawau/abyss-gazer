@@ -88,6 +88,20 @@ export function formatGanttTitle(
   return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日 – ${end.getMonth() + 1}月${end.getDate()}日`;
 }
 
+/** Title for an arbitrary inclusive day range. */
+export function formatGanttSpan(range: GanttRange): string {
+  const { start, end } = range;
+  const sameYear = start.getFullYear() === end.getFullYear();
+  const sameMonth = sameYear && start.getMonth() === end.getMonth();
+  if (sameMonth) {
+    return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日 – ${end.getDate()}日`;
+  }
+  if (sameYear) {
+    return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日 – ${end.getMonth() + 1}月${end.getDate()}日`;
+  }
+  return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日 – ${end.getFullYear()}年${end.getMonth() + 1}月${end.getDate()}日`;
+}
+
 export function ganttColumnIsToday(
   col: GanttColumn,
   today: Date,
@@ -175,6 +189,33 @@ export function buildGanttRange(
     end: addDays(last.start, 6),
     unitDays: 7,
     columnWidth: GANTT_WEEK_COL_PX,
+    columns,
+  };
+}
+
+/** One column per local day from `start` through `end`, inclusive. */
+export function buildGanttDayRange(start: Date, end: Date): GanttRange {
+  const from = startOfLocalDay(start);
+  const to = startOfLocalDay(end);
+  const rangeStart = from <= to ? from : to;
+  const rangeEnd = from <= to ? to : from;
+  const count = daysBetween(rangeStart, rangeEnd) + 1;
+  const columns: GanttColumn[] = Array.from({ length: count }, (_, i) => {
+    const day = addDays(rangeStart, i);
+    const dow = day.getDay();
+    return {
+      start: day,
+      key: dayKey(day),
+      label: `${day.getMonth() + 1}/${day.getDate()}`,
+      sublabel: ["日", "一", "二", "三", "四", "五", "六"][dow],
+      isWeekend: dow === 0 || dow === 6,
+    };
+  });
+  return {
+    start: rangeStart,
+    end: rangeEnd,
+    unitDays: 1,
+    columnWidth: GANTT_DAY_COL_PX,
     columns,
   };
 }

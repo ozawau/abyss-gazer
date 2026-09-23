@@ -50,6 +50,8 @@ interface CalendarViewProps {
   onSelectTask: (id: string | null) => void;
   onStartPomodoro: (taskId: string) => void;
   weekStartsOn: WeekStartsOn;
+  categoryFilter: string;
+  onCategoryFilterChange: (filter: string) => void;
 }
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
@@ -71,6 +73,8 @@ export function CalendarView({
   onSelectTask,
   onStartPomodoro,
   weekStartsOn,
+  categoryFilter,
+  onCategoryFilterChange,
 }: CalendarViewProps) {
   useCnHolidayRevision();
   const viewRef = useRef<HTMLDivElement>(null);
@@ -81,7 +85,6 @@ export function CalendarView({
     startOfLocalDay(new Date()),
   );
   const [categories, setCategories] = useState<Category[]>([]);
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [hideDone, setHideDone] = useState(false);
   const [sessions, setSessions] = useState<PomodoroSession[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -276,7 +279,7 @@ export function CalendarView({
           <span>分类</span>
           <select
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            onChange={(e) => onCategoryFilterChange(e.target.value)}
           >
             <option value="all">全部</option>
             <option value="none">未分类</option>
