@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Category, Task } from "../lib/api";
+import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import { CategoryPicker } from "./CategoryPicker";
 import { ClockEstimatePicker } from "./ClockEstimate";
 
@@ -184,7 +185,7 @@ export function TaskDetailDialog({
               disabled={busy}
             />
             {completed > 0 && (
-              <p className="task-detail-meta">已完成 {completed} 个</p>
+              <p className="task-detail-meta">已完成 {formatPomodoroAmount(completed)} 个</p>
             )}
           </div>
 

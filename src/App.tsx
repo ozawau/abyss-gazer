@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TasksSubNav } from "./components/TasksSubNav";
@@ -28,7 +29,19 @@ import { GanttView } from "./views/GanttView";
 import { PomodoroView } from "./views/PomodoroView";
 import { CategoryFilter, TasksView } from "./views/TasksView";
 import { UpcomingTasksView } from "./views/UpcomingTasksView";
+import { TrayCalendar } from "./views/TrayCalendar";
 import "./styles/app.css";
+
+function isTrayCalendarWindow(): boolean {
+  if (new URLSearchParams(window.location.search).get("view") === "tray-calendar") {
+    return true;
+  }
+  try {
+    return getCurrentWindow().label === "tray-calendar";
+  } catch {
+    return false;
+  }
+}
 
 function ViewSlot({
   active,
@@ -48,7 +61,7 @@ function ViewSlot({
   );
 }
 
-function App() {
+function MainApp() {
   const [activeView, setActiveView] = useState<ViewId>("checkin");
   const [tasksSubPage, setTasksSubPage] = useState<TasksSubPage>("active");
   const [mountedViews, setMountedViews] = useState<ReadonlySet<ViewId>>(
@@ -379,6 +392,11 @@ function App() {
             }
             onTimingChange={setPomodoroTiming}
             onTick={handlePomodoroTick}
+            onTaskChange={(task) => {
+              setTasks((prev) =>
+                prev.map((row) => (row.id === task.id ? task : row)),
+              );
+            }}
             onSessionsChanged={() => {
               void listTasks()
                 .then(setTasks)
@@ -429,4 +447,7 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  if (isTrayCalendarWindow()) return <TrayCalendar />;
+  return <MainApp />;
+}

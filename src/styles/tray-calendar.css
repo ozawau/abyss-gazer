@@ -1,0 +1,167 @@
+html.tray-calendar-root,
+html.tray-calendar-root body,
+html.tray-calendar-root #root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.tray-cal {
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 14px 12px;
+  border-radius: 16px;
+  background: #2c2c2e;
+  color: #f5f5f7;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.tray-cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.tray-cal-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.tray-cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.tray-cal-nav button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tray-cal-nav button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.tray-cal-nav svg {
+  width: 12px;
+  height: 12px;
+}
+
+.tray-cal-today-btn {
+  width: 7px !important;
+  height: 7px !important;
+  margin: 0 6px;
+  border-radius: 50% !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+}
+
+.tray-cal-today-btn:hover {
+  background: #fff !important;
+}
+
+.tray-cal-weekdays,
+.tray-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.tray-cal-weekdays {
+  margin-top: 12px;
+  margin-bottom: 2px;
+}
+
+.tray-cal-weekdays span {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.tray-cal-grid {
+  position: relative;
+  flex: 1;
+  grid-template-rows: repeat(6, 1fr);
+  min-height: 0;
+}
+
+.tray-cal-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.tray-cal-outline path {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.72);
+  stroke-width: 1.35;
+  vector-effect: non-scaling-stroke;
+}
+
+.tray-cal-day {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tray-cal-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 34px;
+  border-radius: 7px;
+  border: 1.5px solid transparent;
+}
+
+.tray-cal-mark.is-today {
+  border-color: #0a84ff;
+}
+
+.tray-cal-num {
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tray-cal-day.is-outside .tray-cal-num {
+  color: rgba(255, 255, 255, 0.34);
+  font-weight: 500;
+}
+
+.tray-cal-dot {
+  width: 4px;
+  height: 4px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.tray-cal-dot.is-on {
+  background: #d45dff;
+}

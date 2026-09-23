@@ -6,6 +6,8 @@ version = 4
 name = "abyss-gazer"
 version = "0.1.0"
 dependencies = [
+ "objc2",
+ "objc2-app-kit",
  "rusqlite",
  "serde",
  "serde_json",

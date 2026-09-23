@@ -342,7 +342,7 @@ textarea {
   flex-direction: column;
 }
 
-.main.is-immersive .view-slot {
+.main.is-immersive .view-slot:not(.is-hidden) {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1518,6 +1518,11 @@ body.is-task-dragging * {
   white-space: nowrap;
 }
 
+.completed-lineage {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .completed-row-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1721,6 +1726,22 @@ body.is-task-dragging * {
   text-align: center;
 }
 
+.pomodoro-task-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.pomodoro-task-line .task-check {
+  margin-top: 0.28rem;
+  flex-shrink: 0;
+}
+
+.pomodoro-task-line strong {
+  text-align: left;
+}
+
 .pomodoro-task strong {
   font-size: clamp(1rem, 2.2vw, 1.35rem);
   font-weight: 400;
@@ -1764,6 +1785,10 @@ body.is-task-dragging * {
 
 .timer-ring.phase-break {
   --ring-color: var(--break-glow);
+}
+
+.timer-ring.is-paused {
+  --ring-color: #64748b;
 }
 
 .timer-face {

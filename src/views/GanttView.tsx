@@ -14,6 +14,7 @@ import {
   startOfLocalDay,
   type WeekStartsOn,
 } from "../lib/calendar";
+import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import {
   buildGanttDayRange,
   buildGanttRange,
@@ -729,7 +730,7 @@ function GanttTaskHover({
         </p>
       )}
       <p>
-        番茄 {task.completed_pomodoros ?? 0}/{task.estimate_pomodoros ?? 0}
+        番茄 {formatPomodoroAmount(task.completed_pomodoros ?? 0)}/{task.estimate_pomodoros ?? 0}
       </p>
     </div>
   );

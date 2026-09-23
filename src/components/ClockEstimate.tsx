@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 
 interface ClockEstimatePickerProps {
   value: number;
@@ -176,8 +177,8 @@ export function TaskPomodoroClocks({
   return (
     <span
       className="task-pomodoro-clocks"
-      title={`已完成 ${completed} / 预期 ${estimate}`}
-      aria-label={`已完成 ${completed} 个，预期 ${estimate} 个番茄钟`}
+      title={`已完成 ${formatPomodoroAmount(completed)} / 预期 ${estimate}`}
+      aria-label={`已完成 ${formatPomodoroAmount(completed)} 个，预期 ${estimate} 个番茄钟`}
     >
       {Array.from({ length: visualCount }, (_, i) => {
         const done = i < completed;
@@ -194,7 +195,7 @@ export function TaskPomodoroClocks({
         );
       })}
       <span className="task-pomodoro-ratio">
-        {completed}/{estimate}
+        {formatPomodoroAmount(completed)}/{estimate}
         {overflow ? "+" : ""}
       </span>
     </span>

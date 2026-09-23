@@ -12,6 +12,7 @@ pub struct PomodoroSession {
     pub started_at: i64,
     pub ended_at: i64,
     pub completed: bool,
+    pub credit: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -22,6 +23,8 @@ pub struct RecordSessionInput {
     pub started_at: i64,
     pub ended_at: i64,
     pub completed: bool,
+    /// Share of one pomodoro, from 0 to 1. Omitted sessions count as 1 when completed.
+    pub credit: Option<f64>,
 }
 
 #[tauri::command]
@@ -35,6 +38,21 @@ pub fn record_pomodoro_session(
     if input.planned_seconds <= 0 {
         return Err("planned_seconds must be positive".into());
     }
+    let credit = match input.credit {
+        Some(value) => {
+            if !value.is_finite() || value < 0.0 || value > 1.0 {
+                return Err("credit must be between 0 and 1".into());
+            }
+            (value * 10.0).round() / 10.0
+        }
+        None => {
+            if input.completed {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    };
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
@@ -57,12 +75,13 @@ pub fn record_pomodoro_session(
         started_at: input.started_at,
         ended_at: input.ended_at,
         completed: input.completed,
+        credit,
     };
 
     conn.execute(
         "INSERT INTO pomodoro_sessions
-         (id, task_id, kind, planned_seconds, started_at, ended_at, completed)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+         (id, task_id, kind, planned_seconds, started_at, ended_at, completed, credit)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![
             session.id,
             session.task_id,
@@ -70,7 +89,8 @@ pub fn record_pomodoro_session(
             session.planned_seconds,
             session.started_at,
             session.ended_at,
-            if session.completed { 1 } else { 0 }
+            if session.completed { 1 } else { 0 },
+            session.credit
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -114,10 +134,10 @@ pub fn count_focus_sessions_since(
     db: State<'_, DbState>,
     task_id: String,
     since_ms: i64,
-) -> Result<i64, String> {
+) -> Result<f64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.query_row(
-        "SELECT COUNT(*) FROM pomodoro_sessions
+        "SELECT CAST(COALESCE(SUM(credit), 0) AS REAL) FROM pomodoro_sessions
          WHERE task_id = ?1
            AND kind = 'focus'
            AND completed = 1
@@ -132,10 +152,10 @@ pub fn count_focus_sessions_since(
 pub fn count_focus_sessions_total_since(
     db: State<'_, DbState>,
     since_ms: i64,
-) -> Result<i64, String> {
+) -> Result<f64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.query_row(
-        "SELECT COUNT(*) FROM pomodoro_sessions
+        "SELECT CAST(COALESCE(SUM(credit), 0) AS REAL) FROM pomodoro_sessions
          WHERE kind = 'focus'
            AND completed = 1
            AND started_at >= ?1",
@@ -148,7 +168,7 @@ pub fn count_focus_sessions_total_since(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FocusCountRow {
     pub task_id: String,
-    pub count: i64,
+    pub count: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,7 +214,7 @@ pub fn list_pomodoro_sessions_in_range(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, task_id, kind, planned_seconds, started_at, ended_at, completed
+            "SELECT id, task_id, kind, planned_seconds, started_at, ended_at, completed, credit
              FROM pomodoro_sessions
              WHERE kind = 'focus'
                AND completed = 1
@@ -213,6 +233,7 @@ pub fn list_pomodoro_sessions_in_range(
                 started_at: row.get(4)?,
                 ended_at: row.get(5)?,
                 completed: row.get::<_, i64>(6)? != 0,
+                credit: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -231,7 +252,7 @@ pub fn list_focus_counts_since(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT task_id, COUNT(*) as cnt FROM pomodoro_sessions
+            "SELECT task_id, CAST(COALESCE(SUM(credit), 0) AS REAL) as cnt FROM pomodoro_sessions
              WHERE kind = 'focus'
                AND completed = 1
                AND started_at >= ?1

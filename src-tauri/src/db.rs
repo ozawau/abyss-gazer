@@ -208,6 +208,18 @@ fn migrate_schema(conn: &Connection) -> SqliteResult<()> {
         )?;
     }
 
+    let mut stmt = conn.prepare("PRAGMA table_info(pomodoro_sessions)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !cols.iter().any(|c| c == "credit") {
+        conn.execute(
+            "ALTER TABLE pomodoro_sessions ADD COLUMN credit REAL NOT NULL DEFAULT 1",
+            [],
+        )?;
+    }
+
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS habit_checkin_items (
             habit_id TEXT NOT NULL,

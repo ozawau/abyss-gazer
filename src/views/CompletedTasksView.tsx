@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
+import { TaskLineageTitle } from "../components/TaskLineageTitle";
 import { TaskRowMenu } from "../components/TaskRowMenu";
 import {
   Category,
@@ -10,7 +11,7 @@ import {
   Task,
   updateTask,
 } from "../lib/api";
-import { applyAncestorFields, removeTaskTree } from "../lib/taskTree";
+import { applyAncestorFields, removeTaskTree, taskById } from "../lib/taskTree";
 
 const PAGE_SIZE = 15;
 
@@ -89,6 +90,8 @@ export function CompletedTasksView({
     for (const c of categories) map.set(c.id, c);
     return map;
   }, [categories]);
+
+  const tasksById = useMemo(() => taskById(tasks), [tasks]);
 
   const filtered = useMemo(() => {
     const q = titleQuery.trim().toLowerCase();
@@ -310,7 +313,7 @@ export function CompletedTasksView({
                 }}
               >
                 <div className="completed-row-main">
-                  <strong className="completed-title">{task.title}</strong>
+                  <TaskLineageTitle task={task} byId={tasksById} />
                   <div className="completed-row-meta">
                     {category ? (
                       <span className="task-category-tag">

@@ -2,9 +2,10 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": ["main", "tray-calendar"],
   "permissions": [
     "core:default",
+    "core:window:allow-hide",
     "core:app:allow-default-window-icon",
     "core:window:allow-set-title",
     "core:window:allow-set-focus",

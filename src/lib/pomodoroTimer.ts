@@ -7,6 +7,14 @@ export interface PomodoroTick {
   phase: PomodoroPhase;
 }
 
+/** One decimal when needed: 0.3 stays "0.3", 2 stays "2". */
+export function formatPomodoroAmount(value: number): string {
+  const tenths = Math.round(value * 10);
+  if (!Number.isFinite(tenths)) return "0";
+  if (tenths % 10 === 0) return String(tenths / 10);
+  return (tenths / 10).toFixed(1);
+}
+
 export function formatPomodoroClock(totalSeconds: number): string {
   const safe = Math.max(0, Math.floor(totalSeconds));
   const m = Math.floor(safe / 60)

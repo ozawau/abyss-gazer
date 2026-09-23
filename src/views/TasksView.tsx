@@ -16,6 +16,7 @@ import {
 import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
 import { TaskRowMenu } from "../components/TaskRowMenu";
+import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import {
   Category,
   createCategory,
@@ -960,7 +961,7 @@ export function TasksView({
           </li>
           <li>
             <span className="stat-label">今日番茄</span>
-            <strong>{categoryStats.todayFocusSessions}</strong>
+            <strong>{formatPomodoroAmount(categoryStats.todayFocusSessions)}</strong>
           </li>
           <li>
             <span className="stat-label">专注任务</span>

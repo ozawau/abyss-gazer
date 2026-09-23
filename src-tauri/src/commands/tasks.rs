@@ -14,7 +14,7 @@ pub struct Task {
     pub parent_id: Option<String>,
     pub category_id: Option<String>,
     pub estimate_pomodoros: i64,
-    pub completed_pomodoros: i64,
+    pub completed_pomodoros: f64,
     pub due_at: Option<i64>,
     pub start_at: Option<i64>,
     pub completed_at: Option<i64>,
@@ -102,8 +102,8 @@ fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 
 const TASK_SELECT: &str = "SELECT t.id, t.title, t.notes, t.status, t.priority, t.sort_order,
        t.parent_id, t.category_id, t.estimate_pomodoros, t.due_at, t.start_at, t.completed_at, t.created_at, t.updated_at,
-       (SELECT COUNT(*) FROM pomodoro_sessions p
-         WHERE p.task_id = t.id AND p.kind = 'focus' AND p.completed = 1) AS completed_pomodoros
+       CAST(COALESCE((SELECT SUM(p.credit) FROM pomodoro_sessions p
+         WHERE p.task_id = t.id AND p.kind = 'focus' AND p.completed = 1), 0) AS REAL) AS completed_pomodoros
      FROM tasks t";
 
 fn next_sort_order_front(

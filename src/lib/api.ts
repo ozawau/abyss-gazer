@@ -37,6 +37,7 @@ export interface PomodoroSession {
   started_at: number;
   ended_at: number;
   completed: boolean;
+  credit?: number;
 }
 
 export function listTasks(): Promise<Task[]> {
@@ -189,6 +190,7 @@ export function recordPomodoroSession(input: {
   started_at: number;
   ended_at: number;
   completed: boolean;
+  credit?: number;
 }): Promise<PomodoroSession> {
   return invoke("record_pomodoro_session", { input });
 }
