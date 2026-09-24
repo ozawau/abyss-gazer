@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex as SyncGate;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
 /// Only one sync runs at a time. A second request returns immediately.
@@ -382,7 +382,7 @@ pub fn set_data_directory(
 }
 
 #[tauri::command]
-pub async fn run_data_sync(app: AppHandle, db: State<'_, DbState>) -> Result<(), String> {
+pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
     let settings = read_system_settings(&app)?;
     if !settings.sync_enabled {
         return Ok(());
@@ -391,28 +391,49 @@ pub async fn run_data_sync(app: AppHandle, db: State<'_, DbState>) -> Result<(),
     let method = settings.sync_method;
     let message = settings.git_commit_message.clone();
     let backup = settings.local_backup_dir.clone();
-    let db_path = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        let db_path = db.db_path.lock().map_err(|e| e.to_string())?;
-        checkpoint_db(&conn)?;
-        db_path.clone()
-    };
 
     let app_for_sync = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let Ok(_gate) = SYNC_GATE.try_lock() else {
             return Ok(());
         };
-        match method {
+        let state = app_for_sync.state::<DbState>();
+        let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let db_path = state
+            .db_path
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone();
+        checkpoint_db(&conn)?;
+        let sync_result = match method {
             SyncMethod::Local => {
                 let backup = backup.as_deref().unwrap_or("");
                 sync_local(&db_path, backup)
             }
             SyncMethod::Git => {
-                let data_dir = resolve_active_data_dir(&app_for_sync)?;
+                let data_dir = db_path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| db_path.clone());
                 sync_git(&data_dir, &message)
             }
+        };
+        // `git pull` replaces abyss.db. The open connection then refuses writes
+        // ("attempt to write a readonly database") until it is reopened.
+        if matches!(method, SyncMethod::Git) {
+            match open_db(&db_path) {
+                Ok(fresh) => *conn = fresh,
+                Err(e) => {
+                    return Err(match sync_result {
+                        Ok(()) => format!("同步后重新打开数据库失败: {e}"),
+                        Err(sync_err) => {
+                            format!("{sync_err}；同步后重新打开数据库失败: {e}")
+                        }
+                    });
+                }
+            }
         }
+        sync_result
     })
     .await
     .map_err(|e| format!("同步任务失败: {e}"))?;

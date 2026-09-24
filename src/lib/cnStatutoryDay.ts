@@ -1,5 +1,6 @@
 import { dayKey } from "./calendar";
 import { getCnHolidayTables } from "./cnHolidayData";
+import { translate, type AppLocale } from "./i18n";
 
 export type StatutoryMark = "holiday" | "adjusted-workday";
 
@@ -43,13 +44,16 @@ export function statutoryDayInfo(date: Date): StatutoryDayInfo | null {
   return null;
 }
 
-export function statutoryDayTitle(info: StatutoryDayInfo): string {
+export function statutoryDayTitle(
+  info: StatutoryDayInfo,
+  locale: AppLocale = "zh",
+): string {
   if (info.mark === "holiday") {
     return info.holidayName
-      ? `法定休假日 · ${info.holidayName}`
-      : "法定休假日";
+      ? translate(locale, "calendar.holidayNamed", { name: info.holidayName })
+      : translate(locale, "calendar.holiday");
   }
   return info.holidayName
-    ? `法定工作日（调休） · ${info.holidayName}`
-    : "法定工作日（调休）";
+    ? translate(locale, "calendar.adjustedNamed", { name: info.holidayName })
+    : translate(locale, "calendar.adjusted");
 }

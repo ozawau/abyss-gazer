@@ -103,7 +103,16 @@ fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 const TASK_SELECT: &str = "SELECT t.id, t.title, t.notes, t.status, t.priority, t.sort_order,
        t.parent_id, t.category_id, t.estimate_pomodoros, t.due_at, t.start_at, t.completed_at, t.created_at, t.updated_at,
        CAST(COALESCE((SELECT SUM(p.credit) FROM pomodoro_sessions p
-         WHERE p.task_id = t.id AND p.kind = 'focus' AND p.completed = 1), 0) AS REAL) AS completed_pomodoros
+         WHERE p.kind = 'focus' AND p.completed = 1
+           AND p.task_id IN (
+             WITH RECURSIVE subtree(id) AS (
+               SELECT t.id
+               UNION ALL
+               SELECT child.id FROM tasks child
+               INNER JOIN subtree ON child.parent_id = subtree.id
+             )
+             SELECT id FROM subtree
+           )), 0) AS REAL) AS completed_pomodoros
      FROM tasks t";
 
 fn next_sort_order_front(
@@ -581,4 +590,45 @@ pub fn delete_task(db: State<'_, DbState>, id: String) -> Result<(), String> {
 pub fn get_task(db: State<'_, DbState>, id: String) -> Result<Task, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     fetch_task(&conn, &id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fetch_task;
+    use crate::db::open_db;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn completed_pomodoros_include_descendants() {
+        let path = std::env::temp_dir().join(format!(
+            "abyss-gazer-rollup-{}.db",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let conn = open_db(&path).expect("open");
+        conn.execute_batch(
+            "INSERT INTO tasks (id, title, notes, status, priority, sort_order, parent_id, created_at, updated_at)
+             VALUES
+               ('p', 'Parent', '', 'todo', 'medium', 0, NULL, 1, 1),
+               ('c', 'Child', '', 'todo', 'medium', 0, 'p', 1, 1),
+               ('g', 'Grand', '', 'todo', 'medium', 0, 'c', 1, 1);
+             INSERT INTO pomodoro_sessions
+               (id, task_id, kind, planned_seconds, started_at, ended_at, completed, credit)
+             VALUES
+               ('s1', 'p', 'focus', 1500, 1, 2, 1, 1.0),
+               ('s2', 'c', 'focus', 1500, 1, 2, 1, 0.3),
+               ('s3', 'g', 'focus', 1500, 1, 2, 1, 0.5);",
+        )
+        .expect("seed");
+
+        let parent = fetch_task(&conn, "p").expect("parent");
+        let child = fetch_task(&conn, "c").expect("child");
+        let grand = fetch_task(&conn, "g").expect("grand");
+        assert!((grand.completed_pomodoros - 0.5).abs() < 0.001);
+        assert!((child.completed_pomodoros - 0.8).abs() < 0.001);
+        assert!((parent.completed_pomodoros - 1.8).abs() < 0.001);
+        let _ = std::fs::remove_file(path);
+    }
 }

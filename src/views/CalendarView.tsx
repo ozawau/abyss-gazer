@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "../components/LocaleProvider";
 import {
   Category,
   listCategories,
   listPomodoroSessionsInRange,
   PomodoroSession,
   Task,
-  TaskPriority,
 } from "../lib/api";
 import type { WeekStartsOn } from "../lib/api";
 import {
@@ -23,6 +23,7 @@ import {
   dayKey,
   focusSessionsOnDay,
   formatDayPanelTitle,
+  formatMonthName,
   formatMonthTitle,
   formatTimeHm,
   formatWeekTitle,
@@ -54,12 +55,6 @@ interface CalendarViewProps {
   onCategoryFilterChange: (filter: string) => void;
 }
 
-const PRIORITY_LABEL: Record<TaskPriority, string> = {
-  high: "高",
-  medium: "中",
-  low: "低",
-};
-
 function densityClass(count: number): string {
   if (count <= 0) return "";
   if (count === 1) return " density-1";
@@ -76,6 +71,7 @@ export function CalendarView({
   categoryFilter,
   onCategoryFilterChange,
 }: CalendarViewProps) {
+  const { locale, t } = useI18n();
   useCnHolidayRevision();
   const viewRef = useRef<HTMLDivElement>(null);
   const today = useMemo(() => startOfLocalDay(new Date()), []);
@@ -189,10 +185,10 @@ export function CalendarView({
   );
 
   const title = useMemo(() => {
-    if (mode === "year") return formatYearTitle(cursor);
-    if (mode === "week") return formatWeekTitle(startOfWeek(cursor, weekStartsOn));
-    return formatMonthTitle(cursor);
-  }, [mode, cursor, weekStartsOn]);
+    if (mode === "year") return formatYearTitle(cursor, locale);
+    if (mode === "week") return formatWeekTitle(startOfWeek(cursor, weekStartsOn), locale);
+    return formatMonthTitle(cursor, locale);
+  }, [mode, cursor, weekStartsOn, locale]);
 
   function goToday() {
     const now = startOfLocalDay(new Date());
@@ -219,22 +215,22 @@ export function CalendarView({
     if (switchMode) setMode(switchMode);
   }
 
-  const weekdays = weekdayShortLabels(weekStartsOn);
+  const weekdays = weekdayShortLabels(weekStartsOn, locale);
 
   return (
     <div className="view calendar-view" ref={viewRef}>
       <header className="view-header calendar-header">
         <div className="calendar-header-main">
-          <h1>日历</h1>
-          <p>查看任务排期与实际完成的番茄专注。</p>
+          <h1>{t("calendar.title")}</h1>
+          <p>{t("calendar.hint")}</p>
         </div>
         <div className="calendar-toolbar">
-          <div className="calendar-mode-tabs" role="tablist" aria-label="视图">
+          <div className="calendar-mode-tabs" role="tablist" aria-label={t("calendar.view")}>
             {(
               [
-                ["year", "年"],
-                ["month", "月"],
-                ["week", "周"],
+                ["year", t("calendar.year")],
+                ["month", t("calendar.month")],
+                ["week", t("calendar.week")],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -251,13 +247,13 @@ export function CalendarView({
           </div>
           <div className="calendar-nav">
             <button type="button" className="secondary-btn" onClick={goPrev}>
-              上一段
+              {t("common.prev")}
             </button>
             <button type="button" className="secondary-btn" onClick={goToday}>
-              今天
+              {t("common.today")}
             </button>
             <button type="button" className="secondary-btn" onClick={goNext}>
-              下一段
+              {t("common.next")}
             </button>
           </div>
         </div>
@@ -276,13 +272,13 @@ export function CalendarView({
           }}
         />
         <label className="calendar-filter-field">
-          <span>分类</span>
+          <span>{t("common.category")}</span>
           <select
             value={categoryFilter}
             onChange={(e) => onCategoryFilterChange(e.target.value)}
           >
-            <option value="all">全部</option>
-            <option value="none">未分类</option>
+            <option value="all">{t("common.all")}</option>
+            <option value="none">{t("common.uncategorized")}</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -296,7 +292,7 @@ export function CalendarView({
             checked={hideDone}
             onChange={(e) => setHideDone(e.target.checked)}
           />
-          隐藏已完成
+          {t("common.hideDone")}
         </label>
       </div>
 
@@ -357,20 +353,22 @@ export function CalendarView({
         </div>
 
         {mode !== "week" && (
-        <aside className="calendar-day-panel" aria-label="当日任务">
+        <aside className="calendar-day-panel" aria-label={t("calendar.dayPanel")}>
           <header className="calendar-day-panel-header">
-            <h2>{formatDayPanelTitle(selectedDay)}</h2>
+            <h2>{formatDayPanelTitle(selectedDay, locale)}</h2>
             <p>
-              排期 {selectedDayScheduledOnly.length} 项 · 完成{" "}
-              {selectedDayCompleted.length} 项 · 完成番茄{" "}
-              {selectedDaySessions.length} 个
+              {t("calendar.summary", {
+                scheduled: selectedDayScheduledOnly.length,
+                done: selectedDayCompleted.length,
+                pomodoros: selectedDaySessions.length,
+              })}
             </p>
           </header>
           {selectedDayScheduledOnly.length === 0 &&
           selectedDayCompleted.length === 0 &&
           selectedDaySessions.length === 0 ? (
             <p className="calendar-day-empty">
-              这一天没有排期、完成的任务或番茄。
+              {t("calendar.empty")}
             </p>
           ) : (
             <>
@@ -384,7 +382,7 @@ export function CalendarView({
               )}
               {selectedDayCompleted.length > 0 && (
                 <DayTaskSection
-                  title="当天完成"
+                  title={t("calendar.completedThatDay")}
                   tasks={selectedDayCompleted}
                   selectedDay={selectedDay}
                   selectedTaskId={selectedTaskId}
@@ -397,7 +395,7 @@ export function CalendarView({
               )}
               {selectedDayScheduledOnly.length > 0 && (
                 <DayTaskSection
-                  title="排期任务"
+                  title={t("calendar.scheduled")}
                   tasks={selectedDayScheduledOnly}
                   selectedDay={selectedDay}
                   selectedTaskId={selectedTaskId}
@@ -428,6 +426,7 @@ function CalendarPeriodJump({
   selectedDay: Date;
   onJump: (day: Date) => void;
 }) {
+  const { t } = useI18n();
   const [yearText, setYearText] = useState(() => String(cursor.getFullYear()));
   const [monthText, setMonthText] = useState(() =>
     String(cursor.getMonth() + 1),
@@ -494,7 +493,7 @@ function CalendarPeriodJump({
   if (mode === "year") {
     return (
       <label className="calendar-jump-field">
-        <span>跳转</span>
+        <span>{t("calendar.jump")}</span>
         <input
           type="number"
           className="calendar-jump-input"
@@ -507,7 +506,7 @@ function CalendarPeriodJump({
             if (e.key === "Enter") commitYear();
           }}
         />
-        <span className="calendar-jump-suffix">年</span>
+        <span className="calendar-jump-suffix">{t("calendar.yearSuffix")}</span>
       </label>
     );
   }
@@ -515,7 +514,7 @@ function CalendarPeriodJump({
   if (mode === "month") {
     return (
       <div className="calendar-jump-field calendar-jump-field-row">
-        <span>跳转</span>
+        <span>{t("calendar.jump")}</span>
         <input
           type="number"
           className="calendar-jump-input calendar-jump-input-year"
@@ -528,7 +527,7 @@ function CalendarPeriodJump({
             if (e.key === "Enter") commitMonthParts();
           }}
         />
-        <span className="calendar-jump-suffix">年</span>
+        <span className="calendar-jump-suffix">{t("calendar.yearSuffix")}</span>
         <input
           type="number"
           className="calendar-jump-input calendar-jump-input-month"
@@ -541,14 +540,14 @@ function CalendarPeriodJump({
             if (e.key === "Enter") commitMonthParts();
           }}
         />
-        <span className="calendar-jump-suffix">月</span>
+        <span className="calendar-jump-suffix">{t("calendar.monthSuffix")}</span>
       </div>
     );
   }
 
   return (
     <label className="calendar-jump-field">
-      <span>跳转</span>
+      <span>{t("calendar.jump")}</span>
       <input
         type="date"
         className="calendar-jump-input calendar-jump-input-date"
@@ -588,7 +587,8 @@ function YearGrid({
   onSelectDay: (day: Date) => void;
   onSelectMonth: (monthIndex: number) => void;
 }) {
-  const weekdays = weekdayShortLabels(weekStartsOn);
+  const { locale, t } = useI18n();
+  const weekdays = weekdayShortLabels(weekStartsOn, locale);
   return (
     <div className="calendar-year-grid">
       {Array.from({ length: 12 }, (_, monthIndex) => {
@@ -601,13 +601,13 @@ function YearGrid({
               className="calendar-year-month-title"
               onClick={() => onSelectMonth(monthIndex)}
             >
-              {monthIndex + 1}月
+              {formatMonthName(monthIndex, locale)}
             </button>
             <div className="calendar-year-weekdays">
               {weekdays.map((w) => (
                 <span
                   key={w}
-                  className={w === "六" || w === "日" ? "is-weekend" : undefined}
+                  className={(weekStartsOn + weekdays.indexOf(w)) % 7 === 0 || (weekStartsOn + weekdays.indexOf(w)) % 7 === 6 ? "is-weekend" : undefined}
                 >
                   {w}
                 </span>
@@ -622,11 +622,11 @@ function YearGrid({
                 const count = countDayActivity(tasks, sessions, day);
                 const statutory = statutoryDayInfo(day);
                 const weekend = day.getDay() === 0 || day.getDay() === 6;
-                const lunar = formatLunarDayShort(day);
+                const lunar = formatLunarDayShort(day, locale);
                 const titleParts: string[] = [];
-                if (lunar) titleParts.push(`农历${lunar}`);
-                if (statutory) titleParts.push(statutoryDayTitle(statutory));
-                if (count > 0) titleParts.push(`${count} 项任务`);
+                if (lunar) titleParts.push(t("calendar.lunar", { text: lunar }));
+                if (statutory) titleParts.push(statutoryDayTitle(statutory, locale));
+                if (count > 0) titleParts.push(t("calendar.taskCount", { count }));
                 return (
                   <button
                     key={dayKey(day)}
@@ -654,7 +654,7 @@ function YearGrid({
                         className={`calendar-year-statutory is-${statutory.mark}`}
                         aria-hidden
                       >
-                        {statutory.mark === "holiday" ? "休" : "班"}
+                        {statutory.mark === "holiday" ? t("calendar.rest") : t("calendar.work")}
                       </span>
                     )}
                   </button>
@@ -691,6 +691,7 @@ function MonthGrid({
   weekStartsOn: WeekStartsOn;
   onSelectDay: (day: Date) => void;
 }) {
+  const { locale, t } = useI18n();
   const cells = useMemo(
     () => buildMonthGrid(anchor, weekStartsOn),
     [anchor, weekStartsOn],
@@ -703,9 +704,9 @@ function MonthGrid({
         {weekdays.map((w) => (
           <span
             key={w}
-            className={w === "六" || w === "日" ? "is-weekend" : undefined}
+            className={(weekStartsOn + weekdays.indexOf(w)) % 7 === 0 || (weekStartsOn + weekdays.indexOf(w)) % 7 === 6 ? "is-weekend" : undefined}
           >
-            周{w}
+            {t("calendar.weekdayPrefix", { day: w })}
           </span>
         ))}
       </div>
@@ -725,7 +726,7 @@ function MonthGrid({
             ? completedFocusCountOnDay(sessions, day)
             : 0;
           const statutory = statutoryDayInfo(day);
-          const lunar = formatLunarDayShort(day);
+          const lunar = formatLunarDayShort(day, locale);
           const weekend = day.getDay() === 0 || day.getDay() === 6;
           const events = new Map<
             string,
@@ -777,7 +778,7 @@ function MonthGrid({
                   {pomodoroCount > 0 && (
                     <span
                       className="calendar-month-pomos"
-                      title={`完成 ${pomodoroCount} 个番茄`}
+                      title={t("calendar.pomodorosDone", { count: pomodoroCount })}
                     >
                       {pomodoroCount}
                     </span>
@@ -787,7 +788,7 @@ function MonthGrid({
                       className={`calendar-month-statutory is-${statutory.mark}`}
                       aria-hidden
                     >
-                      {statutory.mark === "holiday" ? "休" : "班"}
+                      {statutory.mark === "holiday" ? t("calendar.rest") : t("calendar.work")}
                     </span>
                   )}
                 </span>
@@ -808,11 +809,11 @@ function MonthGrid({
                           : "";
                   const toneTitle =
                     event.focus && event.done
-                      ? "已专注并完成"
+                      ? t("calendar.doneAndFocused")
                       : event.done
-                        ? "已完成"
+                        ? t("calendar.completed")
                         : event.focus
-                          ? "已专注"
+                          ? t("calendar.focused")
                           : undefined;
                   return (
                     <li
@@ -868,13 +869,14 @@ function WeekGrid({
   onSelectTask: (id: string | null) => void;
   selectedTaskId: string | null;
 }) {
+  const { t } = useI18n();
   const days = useMemo(
     () => buildWeekDays(anchor, weekStartsOn),
     [anchor, weekStartsOn],
   );
 
   return (
-    <div className="calendar-week-matrix" aria-label="周视图">
+    <div className="calendar-week-matrix" aria-label={t("calendar.weekView")}>
       <div className="calendar-week-matrix-corner" aria-hidden />
       <div className="calendar-week-matrix-hours" aria-hidden>
         {Array.from({ length: 12 }, (_, i) => {
@@ -902,7 +904,7 @@ function WeekGrid({
             }${sameDay(day, selectedDay) ? " is-selected" : ""}`}
             onClick={() => onSelectDay(day)}
           >
-            <span>周{weekdays[index]}</span>
+            <span>{t("calendar.weekdayPrefix", { day: weekdays[index] })}</span>
             <strong>
               {day.getMonth() + 1}/{day.getDate()}
             </strong>
@@ -977,6 +979,7 @@ function DayTaskSection({
   onStartPomodoro: (taskId: string) => void;
   kind: "completed" | "scheduled";
 }) {
+  const { t } = useI18n();
   return (
     <>
       <h3 className="calendar-day-section-title">{title}</h3>
@@ -1001,11 +1004,11 @@ function DayTaskSection({
               >
                 <strong>{formatTaskLineage(task, taskMap)}</strong>
                 <span className="calendar-day-item-meta">
-                  {marker === "done" && <em>完成</em>}
-                  {marker === "start" && <em>开始</em>}
-                  {marker === "due" && <em>到期</em>}
-                  {marker === "span" && <em>进行中</em>}
-                  <span>优先级 {PRIORITY_LABEL[task.priority]}</span>
+                  {marker === "done" && <em>{t("calendar.finishedMark")}</em>}
+                  {marker === "start" && <em>{t("calendar.startMark")}</em>}
+                  {marker === "due" && <em>{t("calendar.dueMark")}</em>}
+                  {marker === "span" && <em>{t("calendar.spanMark")}</em>}
+                  <span>{t("calendar.priority", { level: t(task.priority === "high" ? "common.priorityHighShort" : task.priority === "medium" ? "common.priorityMediumShort" : "common.priorityLowShort") })}</span>
                   {category && (
                     <span className="task-category-tag">
                       <span
@@ -1022,7 +1025,7 @@ function DayTaskSection({
                 <button
                   type="button"
                   className="ghost-btn"
-                  title="开始番茄钟"
+                  title={t("common.startPomodoro")}
                   onClick={() => onStartPomodoro(task.id)}
                 >
                   ▶
@@ -1047,9 +1050,10 @@ function DayFocusList({
   selectedTaskId: string | null;
   onSelectTask: (id: string | null) => void;
 }) {
+  const { t } = useI18n();
   return (
     <>
-      <h3 className="calendar-day-section-title">实际专注</h3>
+      <h3 className="calendar-day-section-title">{t("calendar.actualFocus")}</h3>
       <ul className="calendar-day-list">
         {sessions.map((session) => {
           const task = taskMap.get(session.task_id);
@@ -1068,7 +1072,7 @@ function DayFocusList({
               >
                 <strong>{formatTaskLineage(task, taskMap)}</strong>
                 <span className="calendar-day-item-meta">
-                  <em>已专注</em>
+                  <em>{t("calendar.focusedMark")}</em>
                   <span>
                     {formatTimeHm(session.started_at)}–
                     {formatTimeHm(session.ended_at)}

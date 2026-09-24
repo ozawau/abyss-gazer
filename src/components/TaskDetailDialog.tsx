@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Category, Task } from "../lib/api";
+import { formatDateTime } from "../lib/dateDisplay";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import { CategoryPicker } from "./CategoryPicker";
 import { ClockEstimatePicker } from "./ClockEstimate";
+import { useI18n } from "./LocaleProvider";
 
 export interface TaskDetailSave {
   title: string;
@@ -24,16 +26,6 @@ interface TaskDetailDialogProps {
   onRequestEditCategory?: (category: Category) => void;
   /** Set after a category is created from this dialog. */
   pickedCategory?: { id: string; token: number } | null;
-}
-
-function formatDateTime(ms: number): string {
-  return new Date(ms).toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 /** Convert unix ms → value for <input type="datetime-local">. */
@@ -76,6 +68,7 @@ export function TaskDetailDialog({
   const [subtaskBusy, setSubtaskBusy] = useState(false);
   const [subtaskError, setSubtaskError] = useState<string | null>(null);
   const seenCategoryToken = useRef(0);
+  const { locale, t } = useI18n();
 
   useEffect(() => {
     if (!open || !task) return;
@@ -145,11 +138,11 @@ export function TaskDetailDialog({
         aria-labelledby="task-detail-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="task-detail-title">编辑任务</h2>
+        <h2 id="task-detail-title">{t("detail.title")}</h2>
         <form className="task-detail-form" onSubmit={handleSubmit}>
           <div className="task-detail-scroll">
           <label className="field">
-            <span>任务名称</span>
+            <span>{t("common.taskName")}</span>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -159,11 +152,11 @@ export function TaskDetailDialog({
           </label>
 
           <div className="field">
-            <span>分类</span>
+            <span>{t("common.category")}</span>
             {isSubtask ? (
               <p className="task-detail-meta">
-                {category ? category.name : "未分类"}
-                <span className="task-detail-hint">与父任务相同，不能单独修改</span>
+                {category ? category.name : t("common.uncategorized")}
+                <span className="task-detail-hint">{t("detail.followsParent")}</span>
               </p>
             ) : (
               <CategoryPicker
@@ -178,24 +171,26 @@ export function TaskDetailDialog({
           </div>
 
           <div className="field">
-            <span>预期时钟</span>
+            <span>{t("detail.estimate")}</span>
             <ClockEstimatePicker
               value={estimate}
               onChange={setEstimate}
               disabled={busy}
             />
             {completed > 0 && (
-              <p className="task-detail-meta">已完成 {formatPomodoroAmount(completed)} 个</p>
+              <p className="task-detail-meta">
+                {t("detail.completedCount", { count: formatPomodoroAmount(completed) })}
+              </p>
             )}
           </div>
 
           <div className="field">
-            <span>创建时间</span>
-            <p className="task-detail-meta">{formatDateTime(task.created_at)}</p>
+            <span>{t("detail.created")}</span>
+            <p className="task-detail-meta">{formatDateTime(task.created_at, locale)}</p>
           </div>
 
           <label className="field">
-            <span>开始时间</span>
+            <span>{t("detail.start")}</span>
             <div className="task-detail-due-row">
               <input
                 type="datetime-local"
@@ -210,14 +205,14 @@ export function TaskDetailDialog({
                   disabled={busy}
                   onClick={() => setStartLocal("")}
                 >
-                  清除
+                  {t("common.clear")}
                 </button>
               )}
             </div>
           </label>
 
           <label className="field">
-            <span>到期时间</span>
+            <span>{t("detail.due")}</span>
             <div className="task-detail-due-row">
               <input
                 type="datetime-local"
@@ -232,19 +227,19 @@ export function TaskDetailDialog({
                   disabled={busy}
                   onClick={() => setDueLocal("")}
                 >
-                  清除
+                  {t("common.clear")}
                 </button>
               )}
             </div>
           </label>
 
           <label className="field">
-            <span>详细描述</span>
+            <span>{t("detail.notes")}</span>
             <textarea
               className="task-detail-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="添加任务说明、步骤或备注…"
+              placeholder={t("detail.notesPlaceholder")}
               rows={6}
               disabled={busy}
             />
@@ -265,7 +260,7 @@ export function TaskDetailDialog({
                 }}
                 disabled={busy || subtaskBusy}
               >
-                创建子任务
+                {t("detail.createSubtask")}
               </button>
             )}
             <button
@@ -274,14 +269,14 @@ export function TaskDetailDialog({
               onClick={onClose}
               disabled={busy || subtaskBusy}
             >
-              取消
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
               className="primary-btn"
               disabled={busy || subtaskBusy || !title.trim()}
             >
-              保存
+              {t("common.save")}
             </button>
           </div>
         </form>
@@ -303,7 +298,7 @@ export function TaskDetailDialog({
             aria-labelledby="create-subtask-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="create-subtask-title">创建子任务</h2>
+            <h2 id="create-subtask-title">{t("detail.createSubtask")}</h2>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -321,11 +316,11 @@ export function TaskDetailDialog({
               }}
             >
               <label className="field">
-                <span>任务名称</span>
+                <span>{t("common.taskName")}</span>
                 <input
                   value={subtaskTitle}
                   onChange={(e) => setSubtaskTitle(e.target.value)}
-                  placeholder="输入子任务名称…"
+                  placeholder={t("detail.subtaskName")}
                   autoFocus
                   disabled={subtaskBusy}
                 />
@@ -338,14 +333,14 @@ export function TaskDetailDialog({
                   disabled={subtaskBusy}
                   onClick={() => setSubtaskOpen(false)}
                 >
-                  取消
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="primary-btn"
                   disabled={subtaskBusy || !subtaskTitle.trim()}
                 >
-                  创建
+                  {t("common.create")}
                 </button>
               </div>
             </form>

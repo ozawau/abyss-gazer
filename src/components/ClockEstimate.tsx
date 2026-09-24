@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
+import { useI18n } from "./LocaleProvider";
 
 interface ClockEstimatePickerProps {
   value: number;
@@ -47,6 +48,7 @@ export function ClockEstimatePicker({
   const [customOpen, setCustomOpen] = useState(false);
   const [draft, setDraft] = useState(String(value || ""));
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!customOpen) return;
@@ -92,7 +94,7 @@ export function ClockEstimatePicker({
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="clock-estimate-quick" role="group" aria-label="预期番茄钟">
+      <div className="clock-estimate-quick" role="group" aria-label={t("clock.group")}>
         {Array.from({ length: maxQuick }, (_, i) => {
           const n = i + 1;
           const active = value >= n;
@@ -101,7 +103,7 @@ export function ClockEstimatePicker({
               key={n}
               type="button"
               className={`clock-estimate-btn${active ? " is-active" : ""}`}
-              aria-label={`预期 ${n} 个番茄钟`}
+              aria-label={t("clock.expectN", { count: n })}
               aria-pressed={active}
               disabled={disabled}
               onClick={() => selectQuick(n)}
@@ -113,8 +115,8 @@ export function ClockEstimatePicker({
         <button
           type="button"
           className={`clock-estimate-more${value > maxQuick ? " is-active" : ""}`}
-          title="输入具体数量"
-          aria-label="输入预期番茄钟数量"
+          title={t("clock.custom")}
+          aria-label={t("clock.customLabel")}
           disabled={disabled}
           onClick={() => setCustomOpen((v) => !v)}
         >
@@ -122,7 +124,7 @@ export function ClockEstimatePicker({
         </button>
       </div>
       {value > maxQuick && !customOpen && (
-        <span className="clock-estimate-value" title={`预期 ${value} 个`}>
+        <span className="clock-estimate-value" title={t("clock.expectValue", { count: value })}>
           ×{value}
         </span>
       )}
@@ -136,7 +138,7 @@ export function ClockEstimatePicker({
             inputMode="numeric"
             value={draft}
             disabled={disabled}
-            aria-label="预期番茄钟数量"
+            aria-label={t("clock.amount")}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onCustomKeyDown}
           />
@@ -146,7 +148,7 @@ export function ClockEstimatePicker({
             disabled={disabled}
             onClick={applyCustom}
           >
-            确定
+            {t("common.confirm")}
           </button>
         </div>
       )}
@@ -166,6 +168,7 @@ export function TaskPomodoroClocks({
   estimate,
   completed,
 }: TaskPomodoroClocksProps) {
+  const { t } = useI18n();
   if (estimate <= 0 && completed <= 0) return null;
 
   const visualCount = Math.min(
@@ -177,8 +180,14 @@ export function TaskPomodoroClocks({
   return (
     <span
       className="task-pomodoro-clocks"
-      title={`已完成 ${formatPomodoroAmount(completed)} / 预期 ${estimate}`}
-      aria-label={`已完成 ${formatPomodoroAmount(completed)} 个，预期 ${estimate} 个番茄钟`}
+      title={t("clock.progress", {
+        done: formatPomodoroAmount(completed),
+        estimate,
+      })}
+      aria-label={t("clock.progressLabel", {
+        done: formatPomodoroAmount(completed),
+        estimate,
+      })}
     >
       {Array.from({ length: visualCount }, (_, i) => {
         const done = i < completed;

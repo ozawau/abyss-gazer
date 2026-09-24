@@ -1,4 +1,14 @@
+import { useI18n } from "./LocaleProvider";
+import type { MessageKey } from "../lib/i18n";
 import type { NavItem, ViewId } from "../lib/nav";
+
+const NAV_LABEL: Record<ViewId, MessageKey> = {
+  checkin: "nav.checkin",
+  tasks: "nav.tasks",
+  pomodoro: "nav.pomodoro",
+  calendar: "nav.calendar",
+  gantt: "nav.gantt",
+};
 import {
   formatPomodoroClock,
   isPomodoroTiming,
@@ -28,6 +38,7 @@ export function Sidebar({
   onOpenSettings,
   pomodoroTick = null,
 }: SidebarProps) {
+  const { t } = useI18n();
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -38,9 +49,10 @@ export function Sidebar({
         </div>
       </div>
 
-      <nav className="nav" aria-label="主导航">
+      <nav className="nav" aria-label={t("nav.main")}>
         {items.map((item) => {
           const open = !!subNavOpen[item.id];
+          const label = t(NAV_LABEL[item.id]);
           return (
             <div
               key={item.id}
@@ -53,9 +65,9 @@ export function Sidebar({
                 className="nav-item"
                 disabled={!item.enabled}
                 onClick={() => item.enabled && onNavigate(item.id)}
-                title={item.enabled ? item.label : `${item.label}（即将推出）`}
+                title={item.enabled ? label : t("nav.comingSoon", { label })}
               >
-                <span className="nav-label">{item.label}</span>
+                <span className="nav-label">{label}</span>
                 {item.id === "pomodoro" && isPomodoroTiming(pomodoroTick) && pomodoroTick && (
                   <span
                     className={`nav-timer is-${pomodoroTick.phase}${
@@ -79,9 +91,13 @@ export function Sidebar({
                 <button
                   type="button"
                   className={`nav-subnav-toggle${open ? " is-open" : ""}`}
-                  aria-label={open ? `收起${item.label}子菜单` : `展开${item.label}子菜单`}
+                  aria-label={
+                    open
+                      ? t("nav.collapseSub", { label })
+                      : t("nav.expandSub", { label })
+                  }
                   aria-expanded={open}
-                  title={open ? "收起子菜单" : "展开子菜单"}
+                  title={open ? t("nav.collapseSubTitle") : t("nav.expandSubTitle")}
                   onClick={(e) => {
                     e.stopPropagation();
                     onToggleSubNav(item.id);
@@ -97,9 +113,9 @@ export function Sidebar({
 
       <div className="sidebar-footer">
         <div className="selected-task-chip">
-          <span className="chip-label">当前任务</span>
+          <span className="chip-label">{t("nav.currentTask")}</span>
           <span className="chip-value">
-            {selectedTaskTitle ?? "未选择"}
+            {selectedTaskTitle ?? t("nav.noneSelected")}
           </span>
         </div>
         <button
@@ -107,7 +123,7 @@ export function Sidebar({
           className="sidebar-settings-btn"
           onClick={onOpenSettings}
         >
-          设置
+          {t("common.settings")}
         </button>
       </div>
     </aside>

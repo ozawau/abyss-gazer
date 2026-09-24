@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useI18n } from "./LocaleProvider";
 
 interface TaskRowMenuProps {
   x: number;
@@ -17,6 +18,7 @@ export function TaskRowMenu({
   onDelete,
   onClose,
 }: TaskRowMenuProps) {
+  const { t } = useI18n();
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
 
@@ -57,13 +59,13 @@ export function TaskRowMenu({
       onContextMenu={(event) => event.preventDefault()}
     >
       <button type="button" role="menuitem" onClick={onEdit}>
-        编辑
+        {t("common.edit")}
       </button>
       <button type="button" role="menuitem" onClick={onCreateSubtask}>
-        创建子任务
+        {t("detail.createSubtask")}
       </button>
       <button type="button" role="menuitem" className="is-danger" onClick={onDelete}>
-        删除
+        {t("common.delete")}
       </button>
     </div>
   );

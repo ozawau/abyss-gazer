@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LocaleProvider, publishSystemSettings, useI18n } from "./components/LocaleProvider";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { TasksSubNav } from "./components/TasksSubNav";
@@ -62,6 +63,7 @@ function ViewSlot({
 }
 
 function MainApp() {
+  const { locale, t } = useI18n();
   const [activeView, setActiveView] = useState<ViewId>("checkin");
   const [tasksSubPage, setTasksSubPage] = useState<TasksSubPage>("active");
   const [mountedViews, setMountedViews] = useState<ReadonlySet<ViewId>>(
@@ -124,7 +126,10 @@ function MainApp() {
       });
     getSystemSettings()
       .then((settings) => {
-        if (!cancelled) setSystemSettings(settings);
+        if (!cancelled) {
+          setSystemSettings(settings);
+          publishSystemSettings(settings);
+        }
       })
       .catch(() => {
         /* keep defaults */
@@ -193,14 +198,14 @@ function MainApp() {
   }, []);
 
   useEffect(() => {
-    void syncPomodoroPresence(pomodoroTick);
-  }, [pomodoroTick]);
+    void syncPomodoroPresence(pomodoroTick, locale);
+  }, [pomodoroTick, locale]);
 
   useEffect(() => {
     return () => {
-      void syncPomodoroPresence(null);
+      void syncPomodoroPresence(null, locale);
     };
-  }, []);
+  }, [locale]);
 
   function handleSelectTask(id: string | null) {
     setSelectedTaskId(id);
@@ -253,6 +258,7 @@ function MainApp() {
 
   function handleSystemSettingsChange(next: SystemSettings) {
     setSystemSettings(next);
+    publishSystemSettings(next);
   }
 
   function handleGanttActivityModeChange(mode: GanttActivityMode) {
@@ -427,7 +433,7 @@ function MainApp() {
             aria-labelledby="sync-error-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="sync-error-title">同步已停止</h2>
+            <h2 id="sync-error-title">{t("syncStopped")}</h2>
             <div className="delete-confirm">
               <p>{syncError}</p>
               <div className="delete-confirm-actions">
@@ -436,7 +442,7 @@ function MainApp() {
                   className="primary-btn"
                   onClick={() => setSyncError(null)}
                 >
-                  知道了
+                  {t("common.ok")}
                 </button>
               </div>
             </div>
@@ -448,6 +454,9 @@ function MainApp() {
 }
 
 export default function App() {
-  if (isTrayCalendarWindow()) return <TrayCalendar />;
-  return <MainApp />;
+  return (
+    <LocaleProvider>
+      {isTrayCalendarWindow() ? <TrayCalendar /> : <MainApp />}
+    </LocaleProvider>
+  );
 }

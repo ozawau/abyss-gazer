@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Task } from "../lib/api";
 import { dayKey } from "../lib/calendar";
+import { formatGregorianDate } from "../lib/dateDisplay";
 import { flattenTaskTree } from "../lib/taskTree";
+import { useI18n } from "./LocaleProvider";
 
 interface HabitCheckinDialogProps {
   habit: Task | null;
@@ -30,6 +32,7 @@ export function HabitCheckinDialog({
   onCancel,
   onSave,
 }: HabitCheckinDialogProps) {
+  const { locale, t } = useI18n();
   const [checked, setChecked] = useState(initialChecked);
   const [note, setNote] = useState(initialNote);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelected));
@@ -68,7 +71,7 @@ export function HabitCheckinDialog({
 
   if (!habit || !day) return null;
 
-  const dateLabel = `${day.getFullYear()}年${day.getMonth() + 1}月${day.getDate()}日`;
+  const dateLabel = formatGregorianDate(day, locale);
 
   function toggleSelected(id: string) {
     setSelected((prev) => {
@@ -98,14 +101,14 @@ export function HabitCheckinDialog({
         aria-labelledby="habit-checkin-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 id="habit-checkin-title">打卡详情</h2>
+        <h2 id="habit-checkin-title">{t("checkin.detail")}</h2>
         <form className="task-detail-form" onSubmit={handleSubmit}>
           <div className="task-detail-scroll">
             <p className="task-detail-title-text">{habit.title}</p>
             <p className="task-detail-meta habit-checkin-date">{dateLabel}</p>
 
             <fieldset className="habit-checkin-status">
-              <legend>当天状态</legend>
+              <legend>{t("checkin.dayState")}</legend>
               <label>
                 <input
                   type="radio"
@@ -114,7 +117,7 @@ export function HabitCheckinDialog({
                   disabled={busy}
                   onChange={() => setChecked(true)}
                 />
-                已打卡
+                {t("checkin.checked")}
               </label>
               <label>
                 <input
@@ -124,19 +127,19 @@ export function HabitCheckinDialog({
                   disabled={busy}
                   onChange={() => setChecked(false)}
                 />
-                未打卡
+                {t("checkin.missed")}
               </label>
             </fieldset>
 
             {checkedByClock && (
               <p className="habit-checkin-clock">
-                当天已有完成的番茄钟，保存为未打卡后仍会显示已打卡。
+                {t("checkin.clockStillChecked")}
               </p>
             )}
 
             {hasChildren && (
               <div className="field">
-                <span>任务</span>
+                <span>{t("checkin.tasks")}</span>
                 <ul className="habit-checkin-tree">
                   {tree.map((node) => {
                     const done = node.task.id !== habit.id && node.task.status === "done";
@@ -162,13 +165,13 @@ export function HabitCheckinDialog({
             )}
 
             <label className="field">
-              <span>当天描述</span>
+              <span>{t("checkin.note")}</span>
               <textarea
                 className="task-detail-notes"
                 value={note}
                 rows={4}
                 disabled={busy || !checked}
-                placeholder="记录这一天的情况…"
+                placeholder={t("checkin.notePlaceholder")}
                 onChange={(event) => setNote(event.target.value)}
               />
             </label>
@@ -181,10 +184,10 @@ export function HabitCheckinDialog({
               disabled={busy}
               onClick={onCancel}
             >
-              取消
+              {t("common.cancel")}
             </button>
             <button type="submit" className="primary-btn" disabled={busy}>
-              保存
+              {t("common.save")}
             </button>
           </div>
         </form>

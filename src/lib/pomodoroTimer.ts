@@ -1,3 +1,5 @@
+import { translate, type AppLocale } from "./i18n";
+
 export type PomodoroPhase = "focus" | "break" | "long_break";
 export type PomodoroStatus = "idle" | "running" | "paused";
 
@@ -24,10 +26,10 @@ export function formatPomodoroClock(totalSeconds: number): string {
   return `${m}:${s}`;
 }
 
-export function pomodoroPhaseLabel(phase: PomodoroPhase): string {
-  if (phase === "focus") return "专注";
-  if (phase === "long_break") return "长休息";
-  return "短休息";
+export function pomodoroPhaseLabel(phase: PomodoroPhase, locale: AppLocale = "zh"): string {
+  if (phase === "focus") return translate(locale, "phase.focus");
+  if (phase === "long_break") return translate(locale, "phase.longBreak");
+  return translate(locale, "phase.shortBreak");
 }
 
 export function pomodoroTimeMark(phase: PomodoroPhase, paused: boolean): string {

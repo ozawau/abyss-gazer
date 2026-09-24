@@ -10,6 +10,7 @@ import {
   Task,
   updateTask,
 } from "../lib/api";
+import { useI18n } from "../components/LocaleProvider";
 import { playPomodoroEndChime } from "../lib/pomodoroChime";
 import { formatTaskLineage, taskById } from "../lib/taskTree";
 import {
@@ -67,6 +68,7 @@ export function PomodoroView({
   onTick,
   onTaskChange,
 }: PomodoroViewProps) {
+  const { locale, t } = useI18n();
   const [phase, setPhase] = useState<TimerPhase>("focus");
   const [status, setStatus] = useState<TimerStatus>("idle");
   const [remaining, setRemaining] = useState(
@@ -489,51 +491,51 @@ export function PomodoroView({
     <div className={`view pomodoro-view${fullscreen ? " is-fullscreen" : ""}`}>
       <header className="view-header pomodoro-header">
         <div className="pomodoro-header-text">
-          <h1>番茄钟</h1>
-          <p>选中任务后再开始专注。</p>
+          <h1>{t("pomodoro.title")}</h1>
+          <p>{t("pomodoro.hint")}</p>
         </div>
         {onToggleFullscreen && (
           <button
             type="button"
             className="secondary-btn pomodoro-fullscreen-btn"
             onClick={onToggleFullscreen}
-            title={fullscreen ? "退出全屏" : "应用内全屏"}
+            title={fullscreen ? t("pomodoro.exitFullscreen") : t("pomodoro.enterFullscreen")}
           >
-            {fullscreen ? "退出全屏" : "全屏"}
+            {fullscreen ? t("pomodoro.exitFullscreen") : t("pomodoro.fullscreen")}
           </button>
         )}
       </header>
 
       {!selectedTask && status === "idle" ? (
         <div className="pomodoro-locked">
-          <p>请先在「任务」中选择一个任务。</p>
+          <p>{t("pomodoro.pickTask")}</p>
         </div>
       ) : (
         <div className="pomodoro-panel">
           <div className="pomodoro-task">
-            <span className="chip-label">专注于</span>
+            <span className="chip-label">{t("pomodoro.focusingOn")}</span>
             <div className="pomodoro-task-line">
               {selectedTask && (
                 <button
                   type="button"
                   className={`task-check${selectedTask.status === "done" ? " is-done" : ""}`}
                   aria-label={
-                    selectedTask.status === "done" ? "标记为未完成" : "标记为完成"
+                    selectedTask.status === "done" ? t("common.markTodo") : t("common.markDone")
                   }
                   disabled={togglingDone}
                   onClick={() => void toggleBoundTask()}
                 />
               )}
               <strong>
-                {selectedTaskTitle ?? lastTaskTitleRef.current ?? "任务已删除"}
+                {selectedTaskTitle ?? lastTaskTitleRef.current ?? t("pomodoro.taskDeleted")}
               </strong>
             </div>
             {selectedTask ? (
               <span className="focus-count">
-                今日专注 {formatPomodoroAmount(todayCount)} 个
+                {t("pomodoro.todayCount", { count: formatPomodoroAmount(todayCount) })}
               </span>
             ) : (
-              <span className="focus-count">任务已删除，计时已暂停</span>
+              <span className="focus-count">{t("pomodoro.taskDeletedPaused")}</span>
             )}
           </div>
 
@@ -542,14 +544,14 @@ export function PomodoroView({
             style={{ ["--progress" as string]: String(progress) }}
           >
             <div className="timer-face">
-              <span className="timer-phase">{pomodoroPhaseLabel(phase)}</span>
+              <span className="timer-phase">{pomodoroPhaseLabel(phase, locale)}</span>
               <span className="timer-digits">{formatPomodoroClock(remaining)}</span>
               <span className="timer-status">
                 {status === "running"
-                  ? "进行中"
+                  ? t("pomodoro.running")
                   : status === "paused"
-                    ? "已暂停"
-                    : "待开始"}
+                    ? t("pomodoro.paused")
+                    : t("pomodoro.idle")}
               </span>
             </div>
           </div>
@@ -562,18 +564,18 @@ export function PomodoroView({
                 onClick={start}
                 disabled={!selectedTask}
               >
-                {status === "paused" ? "继续" : "开始"}
+                {status === "paused" ? t("pomodoro.resume") : t("pomodoro.start")}
               </button>
             ) : (
               <button type="button" className="primary-btn is-pause" onClick={pause}>
-                暂停
+                {t("pomodoro.pause")}
               </button>
             )}
             <button type="button" className="secondary-btn" onClick={skip}>
-              跳过
+              {t("pomodoro.skip")}
             </button>
             <button type="button" className="secondary-btn" onClick={reset}>
-              重置
+              {t("pomodoro.reset")}
             </button>
           </div>
         </div>

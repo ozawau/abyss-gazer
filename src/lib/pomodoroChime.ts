@@ -1,4 +1,5 @@
 import { readSoundFile } from "./api";
+import { readStoredLanguage, resolveLocale, translate } from "./i18n";
 
 export const SILENT_SOUND = "none";
 
@@ -58,7 +59,9 @@ async function decodeSound(path: string): Promise<AudioBuffer> {
   const cached = soundCache.get(path);
   if (cached) return cached;
   const ctx = context();
-  if (!ctx) throw new Error("当前环境不支持播放音频");
+  if (!ctx) {
+    throw new Error(translate(resolveLocale(readStoredLanguage()), "audioUnsupported"));
+  }
   const bytes = await readSoundFile(path);
   const copy = Uint8Array.from(bytes).buffer;
   const buffer = await ctx.decodeAudioData(copy);

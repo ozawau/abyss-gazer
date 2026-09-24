@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Category } from "../lib/api";
+import { useI18n } from "./LocaleProvider";
 
 export const CATEGORY_COLORS = [
   "#2563eb",
@@ -33,6 +34,7 @@ export function CategoryDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!open) return;
@@ -93,22 +95,22 @@ export function CategoryDialog({
         aria-labelledby="category-dialog-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="category-dialog-title">{isEdit ? "编辑分类" : "添加分类"}</h2>
+        <h2 id="category-dialog-title">{isEdit ? t("category.edit") : t("category.add")}</h2>
         <form onSubmit={handleSubmit}>
           <label className="field">
-            <span>名称</span>
+            <span>{t("category.name")}</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="例如：工作、学习…"
+              placeholder={t("category.namePlaceholder")}
               autoFocus
               disabled={busy}
             />
           </label>
 
           <div className="field">
-            <span>颜色</span>
-            <div className="color-grid" role="radiogroup" aria-label="分类颜色">
+            <span>{t("category.color")}</span>
+            <div className="color-grid" role="radiogroup" aria-label={t("category.colorLabel")}>
               {colors.map((c) => (
                 <button
                   key={c}
@@ -127,7 +129,7 @@ export function CategoryDialog({
           {confirmDelete && (
             <div className="delete-confirm">
               <p>
-                确定删除分类「{initial?.name}」？相关任务将变为未分类。
+                {t("category.deleteBody", { name: initial?.name ?? "" })}
               </p>
               <div className="delete-confirm-actions">
                 <button
@@ -136,7 +138,7 @@ export function CategoryDialog({
                   disabled={busy}
                   onClick={() => setConfirmDelete(false)}
                 >
-                  取消
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -144,7 +146,7 @@ export function CategoryDialog({
                   disabled={busy}
                   onClick={() => void handleDeleteConfirm()}
                 >
-                  确认删除
+                  {t("common.confirmDelete")}
                 </button>
               </div>
             </div>
@@ -161,7 +163,7 @@ export function CategoryDialog({
                   onClick={() => setConfirmDelete(true)}
                   disabled={busy}
                 >
-                  删除
+                  {t("common.delete")}
                 </button>
               )}
               <button
@@ -170,14 +172,14 @@ export function CategoryDialog({
                 onClick={onClose}
                 disabled={busy}
               >
-                取消
+                {t("common.cancel")}
               </button>
               <button
                 type="submit"
                 className="primary-btn"
                 disabled={busy || !name.trim()}
               >
-                {isEdit ? "保存" : "创建"}
+                {isEdit ? t("common.save") : t("common.create")}
               </button>
             </div>
           )}

@@ -1,4 +1,5 @@
 import type { PomodoroSession, Task } from "./api";
+import { WEEKDAY_SHORT, type AppLocale } from "./i18n";
 import { descendantIds, taskById } from "./taskTree";
 import {
   addDays,
@@ -70,27 +71,43 @@ export function formatGanttTitle(
   scale: GanttScale,
   range: GanttRange,
   cursor: Date,
+  locale: AppLocale = "zh",
 ): string {
-  if (scale === "month") {
-    const start = startOfMonth(cursor);
-    return `${start.getFullYear()}年${start.getMonth() + 1}月`;
-  }
+  if (scale === "month") return formatMonthSpan(startOfMonth(cursor), locale);
   if (scale === "quarter") {
     const start = startOfQuarter(cursor);
     const q = Math.floor(start.getMonth() / 3) + 1;
+    if (locale === "en") return `Q${q} ${start.getFullYear()}`;
     return `${start.getFullYear()}年 第${q}季度`;
   }
-  const { start, end } = range;
-  const sameMonth = start.getMonth() === end.getMonth();
-  if (sameMonth) {
-    return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日 – ${end.getDate()}日`;
+  return formatGanttSpan(range, locale);
+}
+
+function formatMonthSpan(start: Date, locale: AppLocale): string {
+  if (locale === "en") {
+    return start.toLocaleDateString("en", { month: "long", year: "numeric" });
   }
-  return `${start.getFullYear()}年${start.getMonth() + 1}月${start.getDate()}日 – ${end.getMonth() + 1}月${end.getDate()}日`;
+  return `${start.getFullYear()}年${start.getMonth() + 1}月`;
 }
 
 /** Title for an arbitrary inclusive day range. */
-export function formatGanttSpan(range: GanttRange): string {
+export function formatGanttSpan(range: GanttRange, locale: AppLocale = "zh"): string {
   const { start, end } = range;
+  if (locale === "en") {
+    const sameYear = start.getFullYear() === end.getFullYear();
+    const sameMonth = sameYear && start.getMonth() === end.getMonth();
+    const startText = start.toLocaleDateString("en", {
+      month: "short",
+      day: "numeric",
+      year: sameYear ? undefined : "numeric",
+    });
+    const endText = end.toLocaleDateString("en", {
+      month: sameMonth ? undefined : "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    return `${startText} – ${endText}`;
+  }
   const sameYear = start.getFullYear() === end.getFullYear();
   const sameMonth = sameYear && start.getMonth() === end.getMonth();
   if (sameMonth) {
@@ -118,10 +135,15 @@ export function ganttColumnIsToday(
   return sameDay(col.start, today);
 }
 
+function weekdayMark(dow: number, locale: AppLocale): string {
+  return WEEKDAY_SHORT[locale][dow] ?? "";
+}
+
 export function buildGanttRange(
   scale: GanttScale,
   cursor: Date,
   weekStartsOn: WeekStartsOn,
+  locale: AppLocale = "zh",
 ): GanttRange {
   if (scale === "week") {
     const start = startOfWeek(cursor, weekStartsOn);
@@ -132,7 +154,7 @@ export function buildGanttRange(
         start: day,
         key: dayKey(day),
         label: `${day.getMonth() + 1}/${day.getDate()}`,
-        sublabel: ["日", "一", "二", "三", "四", "五", "六"][dow],
+        sublabel: weekdayMark(dow, locale),
         isWeekend: dow === 0 || dow === 6,
       };
     });
@@ -156,7 +178,7 @@ export function buildGanttRange(
         start: day,
         key: dayKey(day),
         label: String(day.getDate()),
-        sublabel: ["日", "一", "二", "三", "四", "五", "六"][dow],
+        sublabel: weekdayMark(dow, locale),
         isWeekend: dow === 0 || dow === 6,
       };
     });
@@ -194,7 +216,11 @@ export function buildGanttRange(
 }
 
 /** One column per local day from `start` through `end`, inclusive. */
-export function buildGanttDayRange(start: Date, end: Date): GanttRange {
+export function buildGanttDayRange(
+  start: Date,
+  end: Date,
+  locale: AppLocale = "zh",
+): GanttRange {
   const from = startOfLocalDay(start);
   const to = startOfLocalDay(end);
   const rangeStart = from <= to ? from : to;
@@ -207,7 +233,7 @@ export function buildGanttDayRange(start: Date, end: Date): GanttRange {
       start: day,
       key: dayKey(day),
       label: `${day.getMonth() + 1}/${day.getDate()}`,
-      sublabel: ["日", "一", "二", "三", "四", "五", "六"][dow],
+      sublabel: weekdayMark(dow, locale),
       isWeekend: dow === 0 || dow === 6,
     };
   });

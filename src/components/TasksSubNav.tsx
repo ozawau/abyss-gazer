@@ -1,4 +1,12 @@
+import { useI18n } from "./LocaleProvider";
+import type { MessageKey } from "../lib/i18n";
 import { TASKS_SUB_NAV, type TasksSubPage } from "../lib/tasksNav";
+
+const PAGE_LABEL: Record<TasksSubPage, MessageKey> = {
+  active: "nav.current",
+  upcoming: "nav.upcoming",
+  completed: "nav.completed",
+};
 
 interface TasksSubNavProps {
   activePage: TasksSubPage;
@@ -6,8 +14,9 @@ interface TasksSubNavProps {
 }
 
 export function TasksSubNav({ activePage, onNavigate }: TasksSubNavProps) {
+  const { t } = useI18n();
   return (
-    <aside className="tasks-subnav" aria-label="任务子页面">
+    <aside className="tasks-subnav" aria-label={t("nav.subPages")}>
       <nav className="tasks-subnav-list">
         {TASKS_SUB_NAV.map((item) => (
           <button
@@ -18,7 +27,7 @@ export function TasksSubNav({ activePage, onNavigate }: TasksSubNavProps) {
             }`}
             onClick={() => onNavigate(item.id)}
           >
-            {item.label}
+            {t(PAGE_LABEL[item.id])}
           </button>
         ))}
       </nav>

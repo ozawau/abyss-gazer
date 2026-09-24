@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useI18n } from "./LocaleProvider";
 
 interface CreateSubtaskDialogProps {
   open: boolean;
@@ -14,6 +15,7 @@ export function CreateSubtaskDialog({
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!open) return;
@@ -49,14 +51,14 @@ export function CreateSubtaskDialog({
         aria-labelledby="create-subtask-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 id="create-subtask-title">创建子任务</h2>
+        <h2 id="create-subtask-title">{t("detail.createSubtask")}</h2>
         <form onSubmit={(event) => void handleSubmit(event)}>
           <label className="field">
-            <span>任务名称</span>
+            <span>{t("common.taskName")}</span>
             <input
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              placeholder="输入子任务名称…"
+              placeholder={t("detail.subtaskName")}
               autoFocus
               disabled={busy}
             />
@@ -69,10 +71,10 @@ export function CreateSubtaskDialog({
               disabled={busy}
               onClick={onClose}
             >
-              取消
+              {t("common.cancel")}
             </button>
             <button type="submit" className="primary-btn" disabled={busy || !title.trim()}>
-              创建
+              {t("common.create")}
             </button>
           </div>
         </form>

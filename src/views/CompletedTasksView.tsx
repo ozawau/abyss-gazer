@@ -3,6 +3,8 @@ import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
 import { TaskLineageTitle } from "../components/TaskLineageTitle";
 import { TaskRowMenu } from "../components/TaskRowMenu";
+import { useI18n } from "../components/LocaleProvider";
+import { formatDateTime } from "../lib/dateDisplay";
 import {
   Category,
   createTask,
@@ -36,23 +38,13 @@ function endOfDayMs(ymd: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function formatDateTime(ms: number | null | undefined): string {
-  if (ms == null) return "—";
-  return new Date(ms).toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 export function CompletedTasksView({
   tasks,
   onTasksChange,
   categoryFilter,
   onCategoryFilterChange,
 }: CompletedTasksViewProps) {
+  const { locale, t } = useI18n();
   const [categories, setCategories] = useState<Category[]>([]);
   const [titleQuery, setTitleQuery] = useState("");
   const [completedFrom, setCompletedFrom] = useState("");
@@ -208,27 +200,27 @@ export function CompletedTasksView({
   return (
     <div className="view completed-tasks-view">
       <header className="view-header">
-        <h1>已完成任务</h1>
-        <p>按完成时间由新到旧排列，可筛选后翻页浏览。</p>
+        <h1>{t("completed.title")}</h1>
+        <p>{t("completed.hint")}</p>
       </header>
 
       <div className="completed-filters">
         <label className="completed-filter-field">
-          <span>任务名称</span>
+          <span>{t("common.taskName")}</span>
           <input
             value={titleQuery}
             onChange={(e) => setTitleQuery(e.target.value)}
-            placeholder="搜索标题…"
+            placeholder={t("common.searchTitle")}
           />
         </label>
         <label className="completed-filter-field">
-          <span>分类</span>
+          <span>{t("common.category")}</span>
           <select
             value={categoryFilter}
             onChange={(e) => onCategoryFilterChange(e.target.value)}
           >
-            <option value="all">全部</option>
-            <option value="none">未分类</option>
+            <option value="all">{t("common.all")}</option>
+            <option value="none">{t("common.uncategorized")}</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -237,38 +229,38 @@ export function CompletedTasksView({
           </select>
         </label>
         <div className="completed-filter-field">
-          <span>完成日期</span>
+          <span>{t("completed.completedDate")}</span>
           <div className="completed-date-range">
             <input
               type="date"
               value={completedFrom}
               onChange={(e) => setCompletedFrom(e.target.value)}
-              aria-label="完成日期起"
+              aria-label={t("completed.completedFrom")}
             />
-            <span className="completed-date-sep">至</span>
+            <span className="completed-date-sep">{t("common.to")}</span>
             <input
               type="date"
               value={completedTo}
               onChange={(e) => setCompletedTo(e.target.value)}
-              aria-label="完成日期止"
+              aria-label={t("completed.completedTo")}
             />
           </div>
         </div>
         <div className="completed-filter-field">
-          <span>创建日期</span>
+          <span>{t("upcoming.createdDate")}</span>
           <div className="completed-date-range">
             <input
               type="date"
               value={createdFrom}
               onChange={(e) => setCreatedFrom(e.target.value)}
-              aria-label="创建日期起"
+              aria-label={t("upcoming.createdFrom")}
             />
-            <span className="completed-date-sep">至</span>
+            <span className="completed-date-sep">{t("common.to")}</span>
             <input
               type="date"
               value={createdTo}
               onChange={(e) => setCreatedTo(e.target.value)}
-              aria-label="创建日期止"
+              aria-label={t("upcoming.createdTo")}
             />
           </div>
         </div>
@@ -279,7 +271,7 @@ export function CompletedTasksView({
             className="secondary-btn completed-filter-clear"
             onClick={clearFilters}
           >
-            清除筛选
+            {t("upcoming.clear")}
           </button>
         </div>
       </div>
@@ -287,16 +279,16 @@ export function CompletedTasksView({
       {error && <p className="error-banner">{error}</p>}
 
       <div className="completed-list-meta">
-        共 {filtered.length} 条
+        {t("common.countItems", { count: filtered.length })}
         {filtered.length > 0 && (
           <>
-            ，第 {safePage}/{totalPages} 页
+            {t("common.pageOf", { page: safePage, pages: totalPages })}
           </>
         )}
       </div>
 
       {pageItems.length === 0 ? (
-        <p className="completed-empty">没有符合条件的已完成任务。</p>
+        <p className="completed-empty">{t("completed.empty")}</p>
       ) : (
         <ul className="completed-list">
           {pageItems.map((task) => {
@@ -325,12 +317,12 @@ export function CompletedTasksView({
                         {category.name}
                       </span>
                     ) : (
-                      <span className="completed-meta-muted">未分类</span>
+                      <span className="completed-meta-muted">{t("common.uncategorized")}</span>
                     )}
                     <span>
-                      完成 {formatDateTime(task.completed_at ?? task.updated_at)}
+                      {t("completed.finished", { time: formatDateTime(task.completed_at ?? task.updated_at, locale) })}
                     </span>
-                    <span>创建 {formatDateTime(task.created_at)}</span>
+                    <span>{t("common.createdAt", { time: formatDateTime(task.created_at, locale) })}</span>
                   </div>
                 </div>
                 <div className="completed-row-actions">
@@ -340,7 +332,7 @@ export function CompletedTasksView({
                     disabled={busy}
                     onClick={() => setDetailTask(task)}
                   >
-                    编辑
+                    {t("common.edit")}
                   </button>
                   <button
                     type="button"
@@ -348,7 +340,7 @@ export function CompletedTasksView({
                     disabled={busy}
                     onClick={() => void restoreTask(task)}
                   >
-                    恢复
+                    {t("completed.restore")}
                   </button>
                   <button
                     type="button"
@@ -356,7 +348,7 @@ export function CompletedTasksView({
                     disabled={busy}
                     onClick={() => setPendingDelete(task)}
                   >
-                    删除
+                    {t("common.delete")}
                   </button>
                 </div>
               </li>
@@ -373,7 +365,7 @@ export function CompletedTasksView({
             disabled={safePage <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
           >
-            上一页
+            {t("common.prevPage")}
           </button>
           <span className="completed-page-indicator">
             {safePage} / {totalPages}
@@ -384,7 +376,7 @@ export function CompletedTasksView({
             disabled={safePage >= totalPages}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
           >
-            下一页
+            {t("common.nextPage")}
           </button>
         </div>
       )}
@@ -401,9 +393,9 @@ export function CompletedTasksView({
             aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2>删除任务</h2>
+            <h2>{t("common.deleteTask")}</h2>
             <div className="delete-confirm">
-              <p>确定删除任务「{pendingDelete.title}」？此操作不可撤销。</p>
+              <p>{t("common.deleteTaskBody", { title: pendingDelete.title })}</p>
               <div className="delete-confirm-actions">
                 <button
                   type="button"
@@ -411,7 +403,7 @@ export function CompletedTasksView({
                   disabled={busy}
                   onClick={() => setPendingDelete(null)}
                 >
-                  取消
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -419,7 +411,7 @@ export function CompletedTasksView({
                   disabled={busy}
                   onClick={() => void confirmDelete()}
                 >
-                  确认删除
+                  {t("common.confirmDelete")}
                 </button>
               </div>
             </div>

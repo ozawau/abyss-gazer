@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { HabitCheckinDialog } from "../components/HabitCheckinDialog";
+import { useI18n } from "../components/LocaleProvider";
+import { WEEKDAY_SHORT } from "../lib/i18n";
 import {
   Category,
   listCategories,
@@ -173,6 +175,7 @@ function isHabitRoot(task: Task, categories: Map<string, Category>): boolean {
 }
 
 export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
+  const { locale, t } = useI18n();
   useCnHolidayRevision();
   const today = useMemo(() => startOfLocalDay(new Date()), []);
   const [mode, setMode] = useState<CheckinMode>("week");
@@ -349,9 +352,11 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
     };
   }, [habits, tasks, streakManual, streakSessions, today]);
 
-  const weekdays = weekdayShortLabels(weekStartsOn);
+  const weekdays = weekdayShortLabels(weekStartsOn, locale);
   const title =
-    mode === "week" ? formatWeekTitle(visibleDays[0] ?? cursor) : formatMonthTitle(cursor);
+    mode === "week"
+      ? formatWeekTitle(visibleDays[0] ?? cursor, locale)
+      : formatMonthTitle(cursor, locale);
 
   function markFor(task: Task, day: Date): Mark | null {
     const dayMs = startOfLocalDay(day).getTime();
@@ -459,15 +464,15 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
     <div className="view calendar-view habit-view">
       <header className="view-header calendar-header">
         <div className="calendar-header-main">
-          <h1>打卡</h1>
-          <p>分类为 Habit 的父任务。父任务或子任务当天完成至少一个番茄钟时，自动算作已打卡。</p>
+          <h1>{t("checkin.title")}</h1>
+          <p>{t("checkin.hint")}</p>
         </div>
         <div className="calendar-toolbar">
-          <div className="calendar-mode-tabs" role="tablist" aria-label="打卡视图">
+          <div className="calendar-mode-tabs" role="tablist" aria-label={t("checkin.view")}>
             {(
               [
-                ["month", "月"],
-                ["week", "周"],
+                ["month", t("calendar.month")],
+                ["week", t("calendar.week")],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -492,14 +497,14 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
                 )
               }
             >
-              上一段
+              {t("common.prev")}
             </button>
             <button
               type="button"
               className="secondary-btn"
               onClick={() => setCursor(startOfLocalDay(new Date()))}
             >
-              今天
+              {t("common.today")}
             </button>
             <button
               type="button"
@@ -510,7 +515,7 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
                 )
               }
             >
-              下一段
+              {t("common.next")}
             </button>
           </div>
         </div>
@@ -524,7 +529,7 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
 
       {habits.length === 0 && (
         <p className="habit-empty">
-          没有分类为 Habit 的父任务。把父任务的分类设为 Habit 后，就可以在这里打卡。
+          {t("checkin.empty")}
         </p>
       )}
 
@@ -543,21 +548,21 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
         />
       ) : (
         <>
-          <ul className="tasks-day-stats habit-week-stats" aria-label="打卡统计">
+          <ul className="tasks-day-stats habit-week-stats" aria-label={t("checkin.stats")}>
             <li>
-              <span className="stat-label">完美打卡天数</span>
+              <span className="stat-label">{t("checkin.perfectDays")}</span>
               <strong>{streaks.totals.perfectDays}</strong>
             </li>
-            <li title="所有习惯里出现过的最长连续打卡，包含已完成的任务">
-              <span className="stat-label">最高连续天数</span>
+            <li title={t("checkin.bestStreakTitle")}>
+              <span className="stat-label">{t("checkin.bestStreak")}</span>
               <strong>{streaks.longest}</strong>
             </li>
             <li>
-              <span className="stat-label">已打卡次数</span>
+              <span className="stat-label">{t("checkin.checkinCount")}</span>
               <strong>{streaks.totals.checked}</strong>
             </li>
-            <li title="已打卡次数 /（已打卡次数 + 未打卡次数）">
-              <span className="stat-label">打卡率</span>
+            <li title={t("checkin.rateTitle")}>
+              <span className="stat-label">{t("checkin.rate")}</span>
               <strong>
                 {streaks.totals.checked + streaks.totals.missed === 0
                   ? "0%"
@@ -665,6 +670,7 @@ function MonthCheckins({
   onOpen: (task: Task, day: Date) => void;
   onSelectDay: (day: Date) => void;
 }) {
+  const { locale, t } = useI18n();
   const cells = useMemo(
     () => buildMonthGrid(anchor, weekStartsOn),
     [anchor, weekStartsOn],
@@ -677,9 +683,9 @@ function MonthCheckins({
         {weekdays.map((label) => (
           <span
             key={label}
-            className={label === "六" || label === "日" ? "is-weekend" : undefined}
+            className={(weekStartsOn + weekdays.indexOf(label)) % 7 === 0 || (weekStartsOn + weekdays.indexOf(label)) % 7 === 6 ? "is-weekend" : undefined}
           >
-            周{label}
+            {t("calendar.weekdayPrefix", { day: label })}
           </span>
         ))}
       </div>
@@ -687,7 +693,7 @@ function MonthCheckins({
         {cells.map((day) => {
           const inMonth = day.getMonth() === month;
           const statutory = statutoryDayInfo(day);
-          const lunar = formatLunarDayShort(day);
+          const lunar = formatLunarDayShort(day, locale);
           const weekend = day.getDay() === 0 || day.getDay() === 6;
           return (
             <div
@@ -713,7 +719,7 @@ function MonthCheckins({
                     className={`calendar-month-statutory is-${statutory.mark}`}
                     aria-hidden
                   >
-                    {statutory.mark === "holiday" ? "休" : "班"}
+                    {statutory.mark === "holiday" ? t("calendar.rest") : t("calendar.work")}
                   </span>
                 )}
               </span>
@@ -727,10 +733,10 @@ function MonthCheckins({
                     const note = detailNote(task, day);
                     const status = on
                       ? byClock
-                        ? "已打卡，当天完成了番茄钟"
-                        : "已打卡"
-                      : "未打卡";
-                    const title = [byClock ? "当天完成了番茄钟" : "", note]
+                        ? t("checkin.checkedByClock")
+                        : t("checkin.checked")
+                      : t("checkin.missed");
+                    const title = [byClock ? t("checkin.clockNote") : "", note]
                       .filter(Boolean)
                       .join("\n");
                     return (
@@ -768,18 +774,19 @@ function MonthCheckins({
 }
 
 function RecordCell({ current, best }: StreakSpan) {
+  const { t } = useI18n();
   return (
     <div className="habit-week-cell habit-week-record" role="gridcell">
       <span
         className={`habit-record${current > 0 ? " is-active" : ""}`}
-        aria-label={`连续打卡 ${current} 天，历史最长 ${best} 天`}
+        aria-label={t("checkin.streakLabel", { current, best })}
       >
         <strong>{current}</strong>
         <span className="habit-record-best">/{best}</span>
       </span>
       <span className="habit-record-tip" role="tooltip">
-        <span>连续打卡天数 {current}</span>
-        <span>历史最长连续打卡天数 {best}</span>
+        <span>{t("checkin.streakCurrent", { count: current })}</span>
+        <span>{t("checkin.streakBest", { count: best })}</span>
       </span>
     </div>
   );
@@ -806,13 +813,14 @@ function WeekCheckins({
   perfectStreak: StreakSpan;
   onOpen: (task: Task, day: Date) => void;
 }) {
-  const weekday = ["日", "一", "二", "三", "四", "五", "六"];
+  const { locale, t } = useI18n();
+  const weekday = WEEKDAY_SHORT[locale];
 
   return (
-    <div className="habit-week" role="grid" aria-label="本周打卡">
+    <div className="habit-week" role="grid" aria-label={t("checkin.weekGrid")}>
       <div className="habit-week-row is-head" role="row">
         <div className="habit-week-corner" />
-        <div className="habit-week-head habit-week-record-head">连续天数</div>
+        <div className="habit-week-head habit-week-record-head">{t("checkin.streakColumn")}</div>
         {days.map((day) => {
           const weekend = day.getDay() === 0 || day.getDay() === 6;
           return (
@@ -822,7 +830,7 @@ function WeekCheckins({
                 weekend ? " is-weekend" : ""
               }`}
             >
-              <span>周{weekday[day.getDay()]}</span>
+              <span>{t("calendar.weekdayPrefix", { day: weekday[day.getDay()] })}</span>
               <strong>{day.getDate()}</strong>
             </div>
           );
@@ -850,16 +858,22 @@ function WeekCheckins({
                 {mark && (
                   <HabitMark
                     mark={mark}
-                    label={`${task.title} ${day.getMonth() + 1}月${day.getDate()}日${
-                      mark === "checked"
-                        ? checkedByClock(task, day)
-                          ? "已打卡，当天完成了番茄钟"
-                          : "已打卡"
-                        : "未打卡"
-                    }`}
+                    label={t("checkin.dayStatus", {
+                      title: task.title,
+                      date: t("checkin.monthDay", {
+                        month: day.getMonth() + 1,
+                        day: day.getDate(),
+                      }),
+                      status:
+                        mark === "checked"
+                          ? checkedByClock(task, day)
+                            ? t("checkin.checkedByClock")
+                            : t("checkin.checked")
+                          : t("checkin.missed"),
+                    })}
                     title={
                       [
-                        checkedByClock(task, day) ? "当天完成了番茄钟" : "",
+                        checkedByClock(task, day) ? t("checkin.clockNote") : "",
                         detailNote(task, day),
                       ]
                         .filter(Boolean)
@@ -875,8 +889,8 @@ function WeekCheckins({
         );
       })}
       <div className="habit-week-row is-perfect" role="row">
-        <div className="habit-week-name" title={`完美打卡，连续 ${perfectStreak.current} 天，历史最长 ${perfectStreak.best} 天`}>
-          <span className="habit-week-title">完美打卡</span>
+        <div className="habit-week-name" title={t("checkin.perfectTitle", { current: perfectStreak.current, best: perfectStreak.best })}>
+          <span className="habit-week-title">{t("checkin.perfect")}</span>
         </div>
         <RecordCell current={perfectStreak.current} best={perfectStreak.best} />
         {days.map((day) => {
@@ -894,7 +908,7 @@ function WeekCheckins({
               role="gridcell"
             >
               {perfect && (
-                <span className="habit-medal" role="img" aria-label="完美打卡" title="当天所有习惯都已打卡">
+                <span className="habit-medal" role="img" aria-label={t("checkin.perfect")} title={t("checkin.perfectMedal")}>
                   <svg viewBox="0 0 32 36" className="habit-medal-icon" aria-hidden>
                     <path fill="#dc2626" d="M6.5 1h6l1.6 13h-6z" />
                     <path fill="#b91c1c" d="M19.5 1H25.5l-1.6 13h-6z" />

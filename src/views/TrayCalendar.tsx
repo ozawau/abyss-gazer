@@ -15,6 +15,7 @@ import {
   type WeekStartsOn,
 } from "../lib/calendar";
 import { leafTasks } from "../lib/taskTree";
+import { useI18n } from "../components/LocaleProvider";
 import "../styles/tray-calendar.css";
 
 const COLS = 7;
@@ -29,6 +30,7 @@ function isTrayHost(): boolean {
 }
 
 export function TrayCalendar() {
+  const { locale, t } = useI18n();
   document.documentElement.classList.add("tray-calendar-root");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
   const [weekStartsOn, setWeekStartsOn] = useState<WeekStartsOn>(DEFAULT_WEEK_STARTS_ON);
@@ -119,7 +121,7 @@ export function TrayCalendar() {
     [cursor, weekStartsOn],
   );
   const month = cursor.getMonth();
-  const weekdays = weekdayShortLabels(weekStartsOn);
+  const weekdays = weekdayShortLabels(weekStartsOn, locale);
   const outline = useMemo(
     () => monthOutlinePath(cells.map((day) => day.getMonth() === month)),
     [cells, month],
@@ -130,17 +132,19 @@ export function TrayCalendar() {
   }
 
   return (
-    <section className="tray-cal" aria-label="日历">
+    <section className="tray-cal" aria-label={t("tray.calendar")}>
       <header className="tray-cal-header">
         <h1>
-          {cursor.getMonth() + 1}月 {cursor.getFullYear()}
+          {locale === "en"
+            ? cursor.toLocaleDateString("en", { month: "long", year: "numeric" })
+            : `${cursor.getMonth() + 1}月 ${cursor.getFullYear()}`}
         </h1>
         <div className="tray-cal-nav">
-          <button type="button" aria-label="上个月" onClick={() => setCursor(addMonths(cursor, -1))}>
+          <button type="button" aria-label={t("tray.prevMonth")} onClick={() => setCursor(addMonths(cursor, -1))}>
             <Chevron direction="left" />
           </button>
-          <button type="button" className="tray-cal-today-btn" aria-label="今天" onClick={goToday} />
-          <button type="button" aria-label="下个月" onClick={() => setCursor(addMonths(cursor, 1))}>
+          <button type="button" className="tray-cal-today-btn" aria-label={t("common.today")} onClick={goToday} />
+          <button type="button" aria-label={t("tray.nextMonth")} onClick={() => setCursor(addMonths(cursor, 1))}>
             <Chevron direction="right" />
           </button>
         </div>

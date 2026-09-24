@@ -16,6 +16,7 @@ import {
 import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
 import { TaskRowMenu } from "../components/TaskRowMenu";
+import { useI18n } from "../components/LocaleProvider";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import {
   Category,
@@ -54,19 +55,20 @@ const EXPAND_STORAGE_KEY = "abyss-gazer.expanded-tasks";
 const POMODORO_MINUTES = 25;
 
 function StatDuration({ totalMinutes }: { totalMinutes: number }) {
+  const { t } = useI18n();
   const { hours, minutes } = splitDurationMinutes(totalMinutes);
   return (
     <strong className="stat-duration">
       {hours > 0 && (
         <>
           <span className="stat-num">{hours}</span>
-          <span className="stat-unit">小时</span>
+          <span className="stat-unit">{t("tasks.hours")}</span>
         </>
       )}
       {(hours === 0 || minutes > 0) && (
         <>
           <span className="stat-num">{minutes}</span>
-          <span className="stat-unit">分</span>
+          <span className="stat-unit">{t("tasks.minutes")}</span>
         </>
       )}
     </strong>
@@ -246,6 +248,7 @@ export function TasksView({
   categoryFilter,
   onCategoryFilterChange,
 }: TasksViewProps) {
+  const { locale, t } = useI18n();
   const [draft, setDraft] = useState("");
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
   const [draftEstimate, setDraftEstimate] = useState(0);
@@ -347,11 +350,11 @@ export function TasksView({
   const dayHeader = useMemo(() => {
     const now = new Date();
     return {
-      date: formatGregorianDate(now),
-      weekday: formatWeekday(now),
-      lunar: formatLunarDate(now),
+      date: formatGregorianDate(now, locale),
+      weekday: formatWeekday(now, locale),
+      lunar: formatLunarDate(now, locale),
     };
-  }, []);
+  }, [locale]);
 
   const categoryStats = useMemo(() => {
     let todayFocusSessions = 0;
@@ -793,7 +796,7 @@ export function TasksView({
         </h2>
         <ul className="task-list">
           {items.length === 0 ? (
-            <li className="task-drop-hint">拖到此处</li>
+            <li className="task-drop-hint">{t("tasks.dropHere")}</li>
           ) : (
             items.map(({ task, depth, hasChildren }) => {
               const selected = task.id === selectedTaskId;
@@ -845,8 +848,8 @@ export function TasksView({
                     <button
                       type="button"
                       className={`task-toggle${collapsed ? " is-collapsed" : ""}`}
-                      title={collapsed ? "展开子任务" : "折叠子任务"}
-                      aria-label={collapsed ? "展开子任务" : "折叠子任务"}
+                      title={collapsed ? t("tasks.expandChildren") : t("tasks.collapseChildren")}
+                      aria-label={collapsed ? t("tasks.expandChildren") : t("tasks.collapseChildren")}
                       aria-expanded={!collapsed}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -863,10 +866,10 @@ export function TasksView({
                     className="drag-handle"
                     title={
                       isSubtask
-                        ? "按住拖动调整子任务排序"
-                        : "按住拖动调整优先级或排序"
+                        ? t("tasks.dragChild")
+                        : t("tasks.dragRoot")
                     }
-                    aria-label={`拖动「${task.title}」调整位置`}
+                    aria-label={t("tasks.dragLabel", { title: task.title })}
                     disabled={busy}
                   >
                     ⋮⋮
@@ -875,7 +878,7 @@ export function TasksView({
                     type="button"
                     className={`task-check${task.status === "done" ? " is-done" : ""}`}
                     aria-label={
-                      task.status === "done" ? "标记为未完成" : "标记为完成"
+                      task.status === "done" ? t("common.markTodo") : t("common.markDone")
                     }
                     onClick={() => toggleStatus(task)}
                     disabled={busy}
@@ -883,8 +886,8 @@ export function TasksView({
                   <button
                     type="button"
                     className="task-play"
-                    title="开始番茄钟"
-                    aria-label={`用番茄钟专注「${task.title}」`}
+                    title={t("common.startPomodoro")}
+                    aria-label={t("tasks.focusTask", { title: task.title })}
                     disabled={busy}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -920,7 +923,7 @@ export function TasksView({
                       }}
                       disabled={busy}
                     >
-                      编辑
+                      {t("common.edit")}
                     </button>
                     <button
                       type="button"
@@ -931,7 +934,7 @@ export function TasksView({
                       }}
                       disabled={busy}
                     >
-                      删除
+                      {t("common.delete")}
                     </button>
                   </div>
                 </li>
@@ -954,29 +957,29 @@ export function TasksView({
             {dayHeader.lunar ? ` · ${dayHeader.lunar}` : ""}
           </p>
         </div>
-        <ul className="tasks-day-stats" aria-label="今日统计">
+        <ul className="tasks-day-stats" aria-label={t("tasks.todayStats")}>
           <li>
-            <span className="stat-label">今日专注</span>
+            <span className="stat-label">{t("tasks.focusToday")}</span>
             <StatDuration totalMinutes={categoryStats.todayFocusMinutes} />
           </li>
           <li>
-            <span className="stat-label">今日番茄</span>
+            <span className="stat-label">{t("tasks.pomodorosToday")}</span>
             <strong>{formatPomodoroAmount(categoryStats.todayFocusSessions)}</strong>
           </li>
           <li>
-            <span className="stat-label">专注任务</span>
+            <span className="stat-label">{t("tasks.focusedTasks")}</span>
             <strong>{categoryStats.todayFocusedTasks}</strong>
           </li>
           <li>
-            <span className="stat-label">已完成</span>
+            <span className="stat-label">{t("tasks.done")}</span>
             <strong>{categoryStats.doneCount}</strong>
           </li>
           <li>
-            <span className="stat-label">剩余预估</span>
+            <span className="stat-label">{t("tasks.remaining")}</span>
             <StatDuration totalMinutes={categoryStats.remainingMinutes} />
           </li>
           <li>
-            <span className="stat-label">未完成</span>
+            <span className="stat-label">{t("tasks.todo")}</span>
             <strong>{categoryStats.todoCount}</strong>
           </li>
         </ul>
@@ -986,8 +989,8 @@ export function TasksView({
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="添加新任务…"
-          aria-label="新任务标题"
+          placeholder={t("tasks.newTask")}
+          aria-label={t("tasks.newTaskLabel")}
           disabled={busy}
         />
         <CategoryPicker
@@ -1004,25 +1007,25 @@ export function TasksView({
           disabled={busy}
         />
         <button type="submit" disabled={busy || !draft.trim()}>
-          添加
+          {t("common.add")}
         </button>
       </form>
 
       <div className="task-list-toolbar">
-      <div className="category-filter" role="toolbar" aria-label="按分类筛选">
+      <div className="category-filter" role="toolbar" aria-label={t("tasks.filter")}>
         <button
           type="button"
           className={`filter-chip${categoryFilter === "all" ? " is-active" : ""}`}
           onClick={() => onCategoryFilterChange("all")}
         >
-          全部
+          {t("common.all")}
         </button>
         <button
           type="button"
           className={`filter-chip${categoryFilter === "none" ? " is-active" : ""}`}
           onClick={() => onCategoryFilterChange("none")}
         >
-          未分类
+          {t("common.uncategorized")}
         </button>
         {categories.map((c) => (
           <button
@@ -1031,7 +1034,7 @@ export function TasksView({
             className={`filter-chip${categoryFilter === c.id ? " is-active" : ""}`}
             onClick={() => onCategoryFilterChange(c.id)}
             onDoubleClick={() => openEditCategory(c)}
-            title="双击编辑分类"
+            title={t("category.edit")}
           >
             <span
               className="category-swatch"
@@ -1047,8 +1050,8 @@ export function TasksView({
           type="button"
           className="secondary-btn task-tree-btn"
           onClick={expandAllSubtasks}
-          title="展开所有子任务"
-          aria-label="展开所有子任务"
+          title={t("tasks.expandAll")}
+          aria-label={t("tasks.expandAll")}
         >
           <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
             <path
@@ -1065,8 +1068,8 @@ export function TasksView({
           type="button"
           className="secondary-btn task-tree-btn"
           onClick={collapseAllSubtasks}
-          title="收起所有子任务"
-          aria-label="收起所有子任务"
+          title={t("tasks.collapseAll")}
+          aria-label={t("tasks.collapseAll")}
         >
           <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden>
             <path
@@ -1086,7 +1089,15 @@ export function TasksView({
 
       <div className={`priority-boards${drag ? " is-dragging" : ""}`}>
         {PRIORITY_GROUPS.map((g) =>
-          renderGroup(g.id, g.label, grouped[g.id]),
+          renderGroup(
+            g.id,
+            g.id === "high"
+              ? t("common.priorityHigh")
+              : g.id === "medium"
+                ? t("common.priorityMedium")
+                : t("common.priorityLow"),
+            grouped[g.id],
+          ),
         )}
       </div>
 
@@ -1178,14 +1189,12 @@ export function TasksView({
             aria-labelledby="delete-task-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="delete-task-title">删除任务</h2>
+            <h2 id="delete-task-title">{t("common.deleteTask")}</h2>
             <div className="delete-confirm">
               <p>
-                确定删除任务「{pendingDeleteTask.title}」
                 {tasks.some((task) => task.parent_id === pendingDeleteTask.id)
-                  ? "及其所有子任务"
-                  : ""}
-                ？此操作不可撤销。
+                  ? t("common.deleteTaskWithChildren", { title: pendingDeleteTask.title })
+                  : t("common.deleteTaskBody", { title: pendingDeleteTask.title })}
               </p>
               <div className="delete-confirm-actions">
                 <button
@@ -1194,7 +1203,7 @@ export function TasksView({
                   disabled={busy}
                   onClick={() => setPendingDeleteTask(null)}
                 >
-                  取消
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -1202,7 +1211,7 @@ export function TasksView({
                   disabled={busy}
                   onClick={() => void confirmRemove()}
                 >
-                  确认删除
+                  {t("common.confirmDelete")}
                 </button>
               </div>
             </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Category } from "../lib/api";
+import { useI18n } from "./LocaleProvider";
 
 interface CategoryPickerProps {
   categories: Category[];
@@ -22,6 +23,7 @@ export function CategoryPicker({
 }: CategoryPickerProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
 
   const selected = categories.find((c) => c.id === value) ?? null;
 
@@ -57,7 +59,7 @@ export function CategoryPicker({
             <span className="category-picker-label">{selected.name}</span>
           </>
         ) : (
-          <span className="category-picker-label is-muted">无分类</span>
+          <span className="category-picker-label is-muted">{t("category.none")}</span>
         )}
         <span className="category-picker-caret" aria-hidden>
           ▾
@@ -77,7 +79,7 @@ export function CategoryPicker({
             }}
           >
             <span className="category-swatch is-empty" aria-hidden />
-            无分类
+            {t("category.none")}
           </button>
           {categories.map((c) => (
             <div
@@ -105,15 +107,15 @@ export function CategoryPicker({
                 <button
                   type="button"
                   className="category-option-edit"
-                  title="编辑分类"
-                  aria-label={`编辑分类「${c.name}」`}
+                  title={t("category.edit")}
+                  aria-label={t("category.editNamed", { name: c.name })}
                   onClick={(e) => {
                     e.stopPropagation();
                     setOpen(false);
                     onRequestEdit(c);
                   }}
                 >
-                  编辑
+                  {t("common.edit")}
                 </button>
               )}
             </div>
@@ -127,7 +129,7 @@ export function CategoryPicker({
                 onRequestCreate();
               }}
             >
-              + 添加分类
+              + {t("category.add")}
             </button>
           )}
         </div>

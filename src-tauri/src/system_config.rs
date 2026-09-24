@@ -36,6 +36,9 @@ pub struct SystemSettings {
     /// Open the app when the user logs in. Applied via the OS login item.
     #[serde(default)]
     pub launch_at_login: bool,
+    /// `system` follows the OS language. Otherwise `zh` or `en`.
+    #[serde(default = "default_language")]
+    pub language: String,
 }
 
 fn default_week_starts_on() -> u8 {
@@ -44,6 +47,10 @@ fn default_week_starts_on() -> u8 {
 
 fn default_gantt_activity_mode() -> String {
     "discrete".into()
+}
+
+fn default_language() -> String {
+    "system".into()
 }
 
 impl Default for SystemSettings {
@@ -58,6 +65,7 @@ impl Default for SystemSettings {
             week_starts_on: default_week_starts_on(),
             gantt_activity_mode: default_gantt_activity_mode(),
             launch_at_login: false,
+            language: default_language(),
         }
     }
 }
@@ -74,6 +82,13 @@ fn normalize_interval(minutes: i64) -> i64 {
     match minutes {
         5 | 10 | 30 => minutes,
         _ => 10,
+    }
+}
+
+fn normalize_language(value: &str) -> String {
+    match value {
+        "zh" | "en" | "system" => value.into(),
+        _ => default_language(),
     }
 }
 
@@ -112,6 +127,7 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
         week_starts_on: normalize_week_starts_on(settings.week_starts_on),
         gantt_activity_mode: normalize_gantt_activity_mode(&settings.gantt_activity_mode),
         launch_at_login: settings.launch_at_login,
+        language: normalize_language(&settings.language),
     }
 }
 

@@ -1,6 +1,5 @@
 import type { PomodoroSession, Task } from "./api";
-
-const WEEKDAY_CN = ["日", "一", "二", "三", "四", "五", "六"];
+import { WEEKDAY_SHORT, type AppLocale } from "./i18n";
 
 /** 与 `Date.getDay()` 一致：0=周日 … 6=周六 */
 export type WeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -80,23 +79,36 @@ export function startOfMonth(date: Date): Date {
 
 export function weekdayShortLabels(
   weekStartsOn: WeekStartsOn = DEFAULT_WEEK_STARTS_ON,
+  locale: AppLocale = "zh",
 ): string[] {
-  return Array.from(
-    { length: 7 },
-    (_, i) => WEEKDAY_CN[(weekStartsOn + i) % 7]!,
-  );
+  const names = WEEKDAY_SHORT[locale];
+  return Array.from({ length: 7 }, (_, i) => names[(weekStartsOn + i) % 7]!);
 }
 
-export function formatMonthTitle(date: Date): string {
+export function formatMonthTitle(date: Date, locale: AppLocale = "zh"): string {
+  if (locale === "en") {
+    return date.toLocaleDateString("en", { month: "long", year: "numeric" });
+  }
   return `${date.getFullYear()}年${date.getMonth() + 1}月`;
 }
 
-export function formatYearTitle(date: Date): string {
+export function formatYearTitle(date: Date, locale: AppLocale = "zh"): string {
+  if (locale === "en") return String(date.getFullYear());
   return `${date.getFullYear()}年`;
 }
 
-export function formatWeekTitle(weekStart: Date): string {
+export function formatWeekTitle(weekStart: Date, locale: AppLocale = "zh"): string {
   const weekEnd = addDays(weekStart, 6);
+  if (locale === "en") {
+    const sameMonth = weekStart.getMonth() === weekEnd.getMonth();
+    const start = weekStart.toLocaleDateString("en", { month: "short", day: "numeric" });
+    const end = weekEnd.toLocaleDateString("en", {
+      month: sameMonth ? undefined : "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    return `${start} – ${end}`;
+  }
   const sameMonth = weekStart.getMonth() === weekEnd.getMonth();
   if (sameMonth) {
     return `${weekStart.getFullYear()}年${weekStart.getMonth() + 1}月${weekStart.getDate()}日 – ${weekEnd.getDate()}日`;
@@ -104,9 +116,24 @@ export function formatWeekTitle(weekStart: Date): string {
   return `${weekStart.getFullYear()}年${weekStart.getMonth() + 1}月${weekStart.getDate()}日 – ${weekEnd.getMonth() + 1}月${weekEnd.getDate()}日`;
 }
 
-export function formatDayPanelTitle(date: Date): string {
-  const weekday = ["日", "一", "二", "三", "四", "五", "六"][date.getDay()] ?? "";
+export function formatDayPanelTitle(date: Date, locale: AppLocale = "zh"): string {
+  if (locale === "en") {
+    return date.toLocaleDateString("en", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+  const weekday = WEEKDAY_SHORT.zh[date.getDay()] ?? "";
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 周${weekday}`;
+}
+
+export function formatMonthName(monthIndex: number, locale: AppLocale): string {
+  if (locale === "en") {
+    return new Date(2000, monthIndex, 1).toLocaleDateString("en", { month: "short" });
+  }
+  return `${monthIndex + 1}月`;
 }
 
 export function formatTimeHm(ms: number): string {

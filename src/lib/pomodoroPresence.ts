@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { translate, type AppLocale } from "./i18n";
 import {
   formatPomodoroClock,
   pomodoroPhaseLabel,
@@ -23,13 +24,14 @@ function presenceTitle(tick: PomodoroTick): string {
   return `${mark} ${formatPomodoroClock(tick.remaining)}`;
 }
 
-function presenceTooltip(tick: PomodoroTick): string {
+function presenceTooltip(tick: PomodoroTick, locale: AppLocale): string {
   const clock = formatPomodoroClock(tick.remaining);
-  if (tick.status === "idle") return `番茄钟 ${clock}`;
+  if (tick.status === "idle") return translate(locale, "presence.idle", { clock });
+  const phase = pomodoroPhaseLabel(tick.phase, locale);
   if (tick.status === "paused") {
-    return `${pomodoroPhaseLabel(tick.phase)}已暂停 ${clock}`;
+    return translate(locale, "presence.paused", { phase, clock });
   }
-  return `${pomodoroPhaseLabel(tick.phase)}剩余 ${clock}`;
+  return translate(locale, "presence.remaining", { phase, clock });
 }
 
 async function applyWindowFallback(windowTitle: string, badge: string) {
@@ -44,10 +46,11 @@ async function applyWindowFallback(windowTitle: string, badge: string) {
 
 export async function syncPomodoroPresence(
   tick: PomodoroTick | null,
+  locale: AppLocale = "zh",
 ): Promise<void> {
   const resolved = resolveTick(tick);
   const title = presenceTitle(resolved);
-  const tooltip = presenceTooltip(resolved);
+  const tooltip = presenceTooltip(resolved, locale);
   const windowTitle = `${title} · ${DEFAULT_WINDOW_TITLE}`;
   const badge = formatPomodoroClock(resolved.remaining);
 

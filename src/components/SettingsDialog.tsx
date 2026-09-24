@@ -16,6 +16,7 @@ import {
   SyncMethod,
   SystemSettings,
   WeekStartsOn,
+  type LanguagePreference,
 } from "../lib/api";
 import {
   SILENT_SOUND,
@@ -23,19 +24,10 @@ import {
   isSilentSound,
   playPomodoroEndChime,
 } from "../lib/pomodoroChime";
+import { publishSystemSettings, useI18n } from "./LocaleProvider";
 import { ToggleSwitch } from "./ToggleSwitch";
 
 type SettingsSection = "pomodoro" | "calendar" | "system";
-
-const WEEK_START_OPTIONS: { value: WeekStartsOn; label: string }[] = [
-  { value: 1, label: "周一" },
-  { value: 2, label: "周二" },
-  { value: 3, label: "周三" },
-  { value: 4, label: "周四" },
-  { value: 5, label: "周五" },
-  { value: 6, label: "周六" },
-  { value: 0, label: "周日" },
-];
 
 interface SettingsDialogProps {
   open: boolean;
@@ -71,6 +63,16 @@ export function SettingsDialog({
   const [defaultDataDir, setDefaultDataDir] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useI18n();
+  const weekStartOptions: { value: WeekStartsOn; label: string }[] = [
+    { value: 1, label: t("settings.weekday.mon") },
+    { value: 2, label: t("settings.weekday.tue") },
+    { value: 3, label: t("settings.weekday.wed") },
+    { value: 4, label: t("settings.weekday.thu") },
+    { value: 5, label: t("settings.weekday.fri") },
+    { value: 6, label: t("settings.weekday.sat") },
+    { value: 0, label: t("settings.weekday.sun") },
+  ];
 
   useEffect(() => {
     if (!open) return;
@@ -149,6 +151,7 @@ export function SettingsDialog({
       onSystemSettingsChange(saved);
     } catch (err) {
       setSystem(system);
+      publishSystemSettings(system);
       setError(String(err));
     } finally {
       setBusy(false);
@@ -164,6 +167,7 @@ export function SettingsDialog({
   function patchSystem(partial: Partial<SystemSettings>) {
     const next = { ...system, ...partial };
     setSystem(next);
+    if (partial.language) publishSystemSettings(next);
     void persistSystem(next);
   }
 
@@ -183,7 +187,7 @@ export function SettingsDialog({
       const selected = await openDialog({
         directory: true,
         multiple: false,
-        title: "选择数据文件目录",
+        title: t("settings.chooseDataDir"),
         defaultPath: activeDataDir || defaultDataDir || undefined,
       });
       if (selected == null || Array.isArray(selected)) return;
@@ -206,8 +210,8 @@ export function SettingsDialog({
   }
 
   function soundFileName(path: string | null): string {
-    if (!path) return "默认提示音";
-    if (isSilentSound(path)) return "无提示音";
+    if (!path) return t("settings.defaultChime");
+    if (isSilentSound(path)) return t("settings.silentChime");
     const name = path.split(/[/\\]/).pop();
     return name || path;
   }
@@ -216,8 +220,8 @@ export function SettingsDialog({
     try {
       const selected = await openDialog({
         multiple: false,
-        title: "选择提示音",
-        filters: [{ name: "音频", extensions: ["mp3", "wav"] }],
+        title: t("settings.chooseSound"),
+        filters: [{ name: t("settings.audio"), extensions: ["mp3", "wav"] }],
       });
       if (selected == null || Array.isArray(selected)) return;
       forgetCachedSound(settings[key]);
@@ -254,7 +258,7 @@ export function SettingsDialog({
       const selected = await openDialog({
         directory: true,
         multiple: false,
-        title: "选择本地备份目录",
+        title: t("settings.chooseBackup"),
         defaultPath: system.localBackupDir || undefined,
       });
       if (selected == null || Array.isArray(selected)) return;
@@ -278,19 +282,19 @@ export function SettingsDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="settings-dialog-header">
-          <h2 id="settings-dialog-title">设置</h2>
+          <h2 id="settings-dialog-title">{t("settings.title")}</h2>
           <button
             type="button"
             className="ghost-btn"
             onClick={onClose}
             disabled={busy}
           >
-            关闭
+            {t("common.close")}
           </button>
         </div>
 
         <div className="settings-dialog-body">
-          <nav className="settings-dialog-nav" aria-label="设置分类">
+          <nav className="settings-dialog-nav" aria-label={t("settings.nav")}>
             <button
               type="button"
               className={`settings-nav-item${
@@ -298,7 +302,7 @@ export function SettingsDialog({
               }`}
               onClick={() => setSection("pomodoro")}
             >
-              番茄钟
+              {t("settings.pomodoro")}
             </button>
             <button
               type="button"
@@ -307,7 +311,7 @@ export function SettingsDialog({
               }`}
               onClick={() => setSection("calendar")}
             >
-              日历
+              {t("settings.calendar")}
             </button>
             <button
               type="button"
@@ -316,7 +320,7 @@ export function SettingsDialog({
               }`}
               onClick={() => setSection("system")}
             >
-              系统设置
+              {t("settings.system")}
             </button>
           </nav>
 
@@ -324,12 +328,12 @@ export function SettingsDialog({
             {section === "pomodoro" && (
               <div className="settings-panel">
                 <header className="settings-panel-header">
-                  <h3>番茄钟</h3>
-                  <p>调整专注与休息节奏，立即作用于番茄钟页面。</p>
+                  <h3>{t("settings.pomodoro")}</h3>
+                  <p>{t("settings.pomodoroHint")}</p>
                 </header>
 
                 <label className="settings-row">
-                  <span className="settings-row-label">单个番茄时间</span>
+                  <span className="settings-row-label">{t("settings.focusMinutes")}</span>
                   <span className="settings-row-control settings-input-suffix">
                     <input
                       type="number"
@@ -349,14 +353,14 @@ export function SettingsDialog({
                         )
                       }
                     />
-                    <span>分钟</span>
+                    <span>{t("settings.minutes")}</span>
                   </span>
                 </label>
 
                 <div className="settings-row">
-                  <span className="settings-row-label">是否休息</span>
+                  <span className="settings-row-label">{t("settings.breaks")}</span>
                   <ToggleSwitch
-                    label="是否休息"
+                    label={t("settings.breaks")}
                     checked={settings.breaksEnabled}
                     disabled={busy}
                     onChange={(checked) =>
@@ -369,7 +373,7 @@ export function SettingsDialog({
                   className={`settings-group${breaksOff ? " is-disabled" : ""}`}
                 >
                   <label className="settings-row">
-                    <span className="settings-row-label">短休息时间</span>
+                    <span className="settings-row-label">{t("settings.shortBreak")}</span>
                     <span className="settings-row-control settings-input-suffix">
                       <input
                         type="number"
@@ -391,14 +395,14 @@ export function SettingsDialog({
                           )
                         }
                       />
-                      <span>分钟</span>
+                      <span>{t("settings.minutes")}</span>
                     </span>
                   </label>
 
                   <div className="settings-row">
-                    <span className="settings-row-label">是否开启长休息</span>
+                    <span className="settings-row-label">{t("settings.longBreakToggle")}</span>
                     <ToggleSwitch
-                      label="是否开启长休息"
+                      label={t("settings.longBreakToggle")}
                       checked={settings.longBreakEnabled}
                       disabled={busy || breaksOff}
                       onChange={(checked) =>
@@ -413,7 +417,7 @@ export function SettingsDialog({
                     }`}
                   >
                     <label className="settings-row">
-                      <span className="settings-row-label">长休息时间</span>
+                      <span className="settings-row-label">{t("settings.longBreak")}</span>
                       <span className="settings-row-control settings-input-suffix">
                         <input
                           type="number"
@@ -435,12 +439,12 @@ export function SettingsDialog({
                             )
                           }
                         />
-                        <span>分钟</span>
+                        <span>{t("settings.minutes")}</span>
                       </span>
                     </label>
 
                     <label className="settings-row">
-                      <span className="settings-row-label">长休息间隔</span>
+                      <span className="settings-row-label">{t("settings.longBreakEvery")}</span>
                       <span className="settings-row-control settings-input-suffix">
                         <input
                           type="number"
@@ -462,7 +466,7 @@ export function SettingsDialog({
                             )
                           }
                         />
-                        <span>个番茄</span>
+                        <span>{t("settings.pomodoros")}</span>
                       </span>
                     </label>
                   </div>
@@ -470,10 +474,10 @@ export function SettingsDialog({
 
                 <div className="settings-row">
                   <span className="settings-row-label">
-                    是否自动进入下一个番茄
+                    {t("settings.autoFocus")}
                   </span>
                   <ToggleSwitch
-                    label="是否自动进入下一个番茄"
+                    label={t("settings.autoFocus")}
                     checked={settings.autoStartFocus}
                     disabled={busy}
                     onChange={(checked) =>
@@ -484,10 +488,10 @@ export function SettingsDialog({
 
                 <div className="settings-row">
                   <span className="settings-row-label">
-                    是否自动进入下一个休息
+                    {t("settings.autoBreak")}
                   </span>
                   <ToggleSwitch
-                    label="是否自动进入下一个休息"
+                    label={t("settings.autoBreak")}
                     checked={settings.autoStartBreak}
                     disabled={busy || breaksOff}
                     onChange={(checked) =>
@@ -497,7 +501,7 @@ export function SettingsDialog({
                 </div>
 
                 <div className="settings-row settings-row-stack">
-                  <span className="settings-row-label">专注结束提示音</span>
+                  <span className="settings-row-label">{t("settings.focusSound")}</span>
                   <div className="settings-path-block">
                     <code className="settings-path-value">
                       {soundFileName(settings.focusEndSound)}
@@ -508,7 +512,7 @@ export function SettingsDialog({
                       disabled={busy || isSilentSound(settings.focusEndSound)}
                       onClick={() => void previewSound("focus")}
                     >
-                      试听
+                      {t("settings.preview")}
                     </button>
                     <button
                       type="button"
@@ -516,7 +520,7 @@ export function SettingsDialog({
                       disabled={busy}
                       onClick={() => void chooseSound("focusEndSound")}
                     >
-                      选择
+                      {t("settings.choose")}
                     </button>
                     <button
                       type="button"
@@ -524,7 +528,7 @@ export function SettingsDialog({
                       disabled={busy || settings.focusEndSound == null}
                       onClick={() => resetSound("focusEndSound")}
                     >
-                      默认
+                      {t("settings.defaultSound")}
                     </button>
                     <button
                       type="button"
@@ -532,13 +536,13 @@ export function SettingsDialog({
                       disabled={busy || isSilentSound(settings.focusEndSound)}
                       onClick={() => muteSound("focusEndSound")}
                     >
-                      无
+                      {t("settings.noneSound")}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-row settings-row-stack">
-                  <span className="settings-row-label">休息结束提示音</span>
+                  <span className="settings-row-label">{t("settings.breakSound")}</span>
                   <div className="settings-path-block">
                     <code className="settings-path-value">
                       {soundFileName(settings.breakEndSound)}
@@ -549,7 +553,7 @@ export function SettingsDialog({
                       disabled={busy || isSilentSound(settings.breakEndSound)}
                       onClick={() => void previewSound("break")}
                     >
-                      试听
+                      {t("settings.preview")}
                     </button>
                     <button
                       type="button"
@@ -557,7 +561,7 @@ export function SettingsDialog({
                       disabled={busy}
                       onClick={() => void chooseSound("breakEndSound")}
                     >
-                      选择
+                      {t("settings.choose")}
                     </button>
                     <button
                       type="button"
@@ -565,7 +569,7 @@ export function SettingsDialog({
                       disabled={busy || settings.breakEndSound == null}
                       onClick={() => resetSound("breakEndSound")}
                     >
-                      默认
+                      {t("settings.defaultSound")}
                     </button>
                     <button
                       type="button"
@@ -573,7 +577,7 @@ export function SettingsDialog({
                       disabled={busy || isSilentSound(settings.breakEndSound)}
                       onClick={() => muteSound("breakEndSound")}
                     >
-                      无
+                      {t("settings.noneSound")}
                     </button>
                   </div>
                 </div>
@@ -583,12 +587,12 @@ export function SettingsDialog({
             {section === "calendar" && (
               <div className="settings-panel">
                 <header className="settings-panel-header">
-                  <h3>日历</h3>
-                  <p>调整年、月、周视图的展示方式。</p>
+                  <h3>{t("settings.calendar")}</h3>
+                  <p>{t("settings.calendarHint")}</p>
                 </header>
 
                 <label className="settings-row">
-                  <span className="settings-row-label">一周开始于</span>
+                  <span className="settings-row-label">{t("settings.weekStarts")}</span>
                   <select
                     className="settings-select"
                     value={system.weekStartsOn}
@@ -599,7 +603,7 @@ export function SettingsDialog({
                       })
                     }
                   >
-                    {WEEK_START_OPTIONS.map((opt) => (
+                    {weekStartOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}
                       </option>
@@ -612,14 +616,32 @@ export function SettingsDialog({
             {section === "system" && (
               <div className="settings-panel">
                 <header className="settings-panel-header">
-                  <h3>系统设置</h3>
-                  <p>管理开机启动、数据目录与同步备份。</p>
+                  <h3>{t("settings.system")}</h3>
+                  <p>{t("settings.systemHint")}</p>
                 </header>
 
+                <label className="settings-row">
+                  <span className="settings-row-label">{t("settings.language")}</span>
+                  <select
+                    className="settings-select"
+                    value={system.language ?? "system"}
+                    disabled={busy}
+                    onChange={(e) =>
+                      patchSystem({
+                        language: e.target.value as LanguagePreference,
+                      })
+                    }
+                  >
+                    <option value="system">{t("settings.followSystem")}</option>
+                    <option value="zh">{t("settings.chinese")}</option>
+                    <option value="en">{t("settings.english")}</option>
+                  </select>
+                </label>
+
                 <div className="settings-row">
-                  <span className="settings-row-label">开机启动</span>
+                  <span className="settings-row-label">{t("settings.launchAtLogin")}</span>
                   <ToggleSwitch
-                    label="开机启动"
+                    label={t("settings.launchAtLogin")}
                     checked={system.launchAtLogin}
                     disabled={busy}
                     onChange={(checked) =>
@@ -629,7 +651,7 @@ export function SettingsDialog({
                 </div>
 
                 <div className="settings-row settings-row-stack">
-                  <span className="settings-row-label">数据文件目录</span>
+                  <span className="settings-row-label">{t("settings.dataDir")}</span>
                   <div className="settings-path-block">
                     <code className="settings-path-value">
                       {activeDataDir || defaultDataDir || "—"}
@@ -640,15 +662,15 @@ export function SettingsDialog({
                       disabled={busy}
                       onClick={() => void chooseDataDir()}
                     >
-                      选择目录
+                      {t("settings.chooseDir")}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-row">
-                  <span className="settings-row-label">开启同步</span>
+                  <span className="settings-row-label">{t("settings.sync")}</span>
                   <ToggleSwitch
-                    label="开启同步"
+                    label={t("settings.sync")}
                     checked={system.syncEnabled}
                     disabled={busy}
                     onChange={(checked) =>
@@ -661,7 +683,7 @@ export function SettingsDialog({
                   className={`settings-group${syncOff ? " is-disabled" : ""}`}
                 >
                   <label className="settings-row">
-                    <span className="settings-row-label">同步方式</span>
+                    <span className="settings-row-label">{t("settings.syncMethod")}</span>
                     <select
                       className="settings-select"
                       value={system.syncMethod}
@@ -672,13 +694,13 @@ export function SettingsDialog({
                         })
                       }
                     >
-                      <option value="local">本地磁盘</option>
+                      <option value="local">{t("settings.localDisk")}</option>
                       <option value="git">Git</option>
                     </select>
                   </label>
 
                   <label className="settings-row">
-                    <span className="settings-row-label">同步间隔</span>
+                    <span className="settings-row-label">{t("settings.interval")}</span>
                     <select
                       className="settings-select"
                       value={system.syncIntervalMinutes}
@@ -691,18 +713,18 @@ export function SettingsDialog({
                         })
                       }
                     >
-                      <option value={5}>5 分钟</option>
-                      <option value={10}>10 分钟</option>
-                      <option value={30}>30 分钟</option>
+                      <option value={5}>{t("settings.minutesCount", { count: 5 })}</option>
+                      <option value={10}>{t("settings.minutesCount", { count: 10 })}</option>
+                      <option value={30}>{t("settings.minutesCount", { count: 30 })}</option>
                     </select>
                   </label>
 
                   {system.syncMethod === "local" && (
                     <div className="settings-row settings-row-stack">
-                      <span className="settings-row-label">备份目录</span>
+                      <span className="settings-row-label">{t("settings.backupDir")}</span>
                       <div className="settings-path-block">
                         <code className="settings-path-value">
-                          {system.localBackupDir || "未选择"}
+                          {system.localBackupDir || t("settings.backupUnset")}
                         </code>
                         <button
                           type="button"
@@ -710,7 +732,7 @@ export function SettingsDialog({
                           disabled={busy || syncOff}
                           onClick={() => void chooseBackupDir()}
                         >
-                          选择目录
+                          {t("settings.chooseDir")}
                         </button>
                       </div>
                     </div>

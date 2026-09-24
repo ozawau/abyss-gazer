@@ -6,7 +6,6 @@ import {
   listPomodoroSessionsInRange,
   PomodoroSession,
   Task,
-  TaskPriority,
 } from "../lib/api";
 import {
   addDays,
@@ -14,7 +13,9 @@ import {
   startOfLocalDay,
   type WeekStartsOn,
 } from "../lib/calendar";
+import { formatShortDate } from "../lib/dateDisplay";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
+import { useI18n } from "../components/LocaleProvider";
 import {
   buildGanttDayRange,
   buildGanttRange,
@@ -50,16 +51,10 @@ interface GanttViewProps {
   onCategoryFilterChange: (filter: string) => void;
 }
 
-const PRIORITY_LABEL: Record<TaskPriority, string> = {
-  high: "高",
-  medium: "中",
-  low: "低",
-};
-
-const SCALE_TABS: { id: GanttScale; label: string }[] = [
-  { id: "week", label: "双周" },
-  { id: "month", label: "月" },
-  { id: "quarter", label: "季" },
+const SCALE_TABS: { id: GanttScale }[] = [
+  { id: "week" },
+  { id: "month" },
+  { id: "quarter" },
 ];
 
 export function GanttView({
@@ -73,6 +68,7 @@ export function GanttView({
   categoryFilter,
   onCategoryFilterChange,
 }: GanttViewProps) {
+  const { locale, t } = useI18n();
   const today = useMemo(() => startOfLocalDay(new Date()), []);
   const [scale, setScale] = useState<GanttScale | null>("month");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
@@ -117,10 +113,10 @@ export function GanttView({
 
   const baseRange = useMemo(() => {
     if (scale == null && customRange) {
-      return buildGanttDayRange(customRange.start, customRange.end);
+      return buildGanttDayRange(customRange.start, customRange.end, locale);
     }
-    return buildGanttRange(scale ?? "month", cursor, weekStartsOn);
-  }, [scale, cursor, weekStartsOn, customRange]);
+    return buildGanttRange(scale ?? "month", cursor, weekStartsOn, locale);
+  }, [scale, cursor, weekStartsOn, customRange, locale]);
 
   const range = useMemo(() => {
     const count = Math.max(baseRange.columns.length, 1);
@@ -230,8 +226,10 @@ export function GanttView({
   );
 
   const title =
-    scale == null ? formatGanttSpan(range) : formatGanttTitle(scale, range, cursor);
-  const emptyMessage = "当前时间范围内没有排期、专注或完成的任务。";
+    scale == null
+      ? formatGanttSpan(range, locale)
+      : formatGanttTitle(scale, range, cursor, locale);
+  const emptyMessage = t("gantt.empty");
 
   useLayoutEffect(() => {
     const board = boardRef.current;
@@ -301,11 +299,11 @@ export function GanttView({
     <div className="view gantt-view">
       <header className="view-header calendar-header">
         <div className="calendar-header-main">
-          <h1>甘特图</h1>
-          <p>查看排期，以及时间范围内的专注与完成记录。</p>
+          <h1>{t("gantt.title")}</h1>
+          <p>{t("gantt.hint")}</p>
         </div>
         <div className="calendar-toolbar">
-          <div className="calendar-mode-tabs" role="tablist" aria-label="时间粒度">
+          <div className="calendar-mode-tabs" role="tablist" aria-label={t("gantt.scale")}>
             {SCALE_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -318,19 +316,25 @@ export function GanttView({
                   setScale(tab.id);
                 }}
               >
-                {tab.label}
+                {t(
+                  tab.id === "week"
+                    ? "gantt.fortnight"
+                    : tab.id === "month"
+                      ? "gantt.month"
+                      : "gantt.quarter",
+                )}
               </button>
             ))}
           </div>
           <div className="calendar-nav">
             <button type="button" className="secondary-btn" onClick={goPrev}>
-              上一段
+              {t("common.prev")}
             </button>
             <button type="button" className="secondary-btn" onClick={goToday}>
-              今天
+              {t("common.today")}
             </button>
             <button type="button" className="secondary-btn" onClick={goNext}>
-              下一段
+              {t("common.next")}
             </button>
           </div>
         </div>
@@ -340,7 +344,7 @@ export function GanttView({
         <div className="gantt-filters-main">
           <strong className="calendar-period-title">{title}</strong>
           <label className="calendar-jump-field">
-            <span>开始</span>
+            <span>{t("gantt.start")}</span>
             <input
               type="date"
               className="calendar-jump-input calendar-jump-input-date"
@@ -349,7 +353,7 @@ export function GanttView({
             />
           </label>
           <label className="calendar-jump-field">
-            <span>结束</span>
+            <span>{t("gantt.end")}</span>
             <input
               type="date"
               className="calendar-jump-input calendar-jump-input-date"
@@ -358,13 +362,13 @@ export function GanttView({
             />
           </label>
           <label className="calendar-filter-field">
-            <span>分类</span>
+            <span>{t("common.category")}</span>
             <select
               value={categoryFilter}
               onChange={(e) => onCategoryFilterChange(e.target.value)}
             >
-              <option value="all">全部</option>
-              <option value="none">未分类</option>
+              <option value="all">{t("common.all")}</option>
+              <option value="none">{t("common.uncategorized")}</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -378,13 +382,13 @@ export function GanttView({
               checked={hideDone}
               onChange={(e) => setHideDone(e.target.checked)}
             />
-            隐藏已完成
+            {t("common.hideDone")}
           </label>
         </div>
         <div
           className="gantt-activity-switch"
           role="radiogroup"
-          aria-label="任务活动显示模式"
+          aria-label={t("gantt.activity")}
         >
           {(["discrete", "continuous"] as const).map((mode) => (
             <button
@@ -397,7 +401,7 @@ export function GanttView({
               }`}
               onClick={() => onActivityModeChange(mode)}
             >
-              {mode === "discrete" ? "离散" : "连续"}
+              {mode === "discrete" ? t("gantt.discrete") : t("gantt.continuous")}
             </button>
           ))}
         </div>
@@ -509,6 +513,7 @@ function GanttParentRowView({
     next: { task: Task; parent: Task; x: number; y: number } | null,
   ) => void;
 }) {
+  const { t } = useI18n();
   const { parent, items } = row;
   const lanes = items.map((task) => {
     const continuousBar =
@@ -573,7 +578,7 @@ function GanttParentRowView({
           <button
             type="button"
             className="gantt-name-play"
-            title="开始番茄钟"
+            title={t("common.startPomodoro")}
             onClick={() => onStartPomodoro(parent.id)}
           >
             ▶
@@ -615,10 +620,10 @@ function GanttParentRowView({
                   }}
                   title={
                     mark.count > 0
-                      ? `完成 ${mark.count} 个番茄`
+                      ? t("calendar.pomodorosDone", { count: mark.count })
                       : mark.kind === "done"
-                        ? "完成"
-                        : "专注"
+                        ? t("gantt.finished")
+                        : t("gantt.focused")
                   }
                   onMouseEnter={(e) => {
                     onHover({
@@ -703,7 +708,14 @@ function GanttTaskHover({
   y: number;
   category: Category | null;
 }) {
+  const { locale, t } = useI18n();
   const left = Math.min(x + 14, window.innerWidth - 280);
+  const priority =
+    task.priority === "high"
+      ? t("common.priorityHighShort")
+      : task.priority === "medium"
+        ? t("common.priorityMediumShort")
+        : t("common.priorityLowShort");
   const top = Math.min(y + 16, window.innerHeight - 180);
   return (
     <div
@@ -712,25 +724,28 @@ function GanttTaskHover({
       role="tooltip"
     >
       <strong>{task.title}</strong>
-      {task.id !== parent.id && <p>父任务 {parent.title}</p>}
+      {task.id !== parent.id && <p>{t("gantt.parent", { title: parent.title })}</p>}
       <p>
-        {task.status === "done" ? "已完成" : "未完成"}
-        {` · 优先级 ${PRIORITY_LABEL[task.priority]}`}
+        {task.status === "done" ? t("common.done") : t("common.notDone")}
+        {` · ${t("calendar.priority", { level: priority })}`}
         {category ? ` · ${category.name}` : ""}
       </p>
       {(task.start_at != null || task.due_at != null) && (
         <p>
           {task.start_at
-            ? `开始 ${new Date(task.start_at).toLocaleDateString("zh-CN")}`
+            ? t("gantt.starts", { date: formatShortDate(task.start_at, locale) })
             : ""}
           {task.start_at && task.due_at ? " · " : ""}
           {task.due_at
-            ? `到期 ${new Date(task.due_at).toLocaleDateString("zh-CN")}`
+            ? t("gantt.due", { date: formatShortDate(task.due_at, locale) })
             : ""}
         </p>
       )}
       <p>
-        番茄 {formatPomodoroAmount(task.completed_pomodoros ?? 0)}/{task.estimate_pomodoros ?? 0}
+        {t("gantt.clocks", {
+          done: formatPomodoroAmount(task.completed_pomodoros ?? 0),
+          estimate: task.estimate_pomodoros ?? 0,
+        })}
       </p>
     </div>
   );

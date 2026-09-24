@@ -294,6 +294,8 @@ export type SyncIntervalMinutes = 5 | 10 | 30;
 /** 0=周日 … 6=周六，与 `Date.getDay()` 一致 */
 export type WeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
+export type LanguagePreference = "system" | "zh" | "en";
+
 export interface SystemSettings {
   dataDir: string | null;
   syncEnabled: boolean;
@@ -304,6 +306,8 @@ export interface SystemSettings {
   weekStartsOn: WeekStartsOn;
   ganttActivityMode: "discrete" | "continuous";
   launchAtLogin: boolean;
+  /** `system` follows the OS language. */
+  language: LanguagePreference;
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -316,6 +320,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   weekStartsOn: 1,
   ganttActivityMode: "discrete",
   launchAtLogin: false,
+  language: "system",
 };
 
 export function getSystemSettings(): Promise<SystemSettings> {
