@@ -109,7 +109,7 @@ fn position_calendar(window: &WebviewWindow, icon: &Rect) {
 }
 
 fn show_calendar(app: &AppHandle, icon: &Rect) {
-    let Some(window) = app.get_webview_window(TRAY_CALENDAR_LABEL) else {
+    let Some(window) = ensure_calendar_window(app) else {
         return;
     };
     position_calendar(&window, icon);
@@ -121,7 +121,7 @@ fn show_calendar(app: &AppHandle, icon: &Rect) {
 
 fn toggle_calendar(app: &AppHandle, icon: Rect) {
     prevent_app_window_order();
-    let Some(window) = app.get_webview_window(TRAY_CALENDAR_LABEL) else {
+    let Some(window) = ensure_calendar_window(app) else {
         return;
     };
     if window.is_visible().unwrap_or(false) {
@@ -166,7 +166,14 @@ pub fn install_pomodoro_tray(app: &App) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-pub fn install_tray_calendar(app: &App) -> Result<(), Box<dyn std::error::Error>> {
+fn ensure_calendar_window(app: &AppHandle) -> Option<WebviewWindow> {
+    if let Some(window) = app.get_webview_window(TRAY_CALENDAR_LABEL) {
+        return Some(window);
+    }
+    create_calendar_window(app).ok()
+}
+
+fn create_calendar_window(app: &AppHandle) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
     let window = tauri::webview::WebviewWindowBuilder::new(
         app,
         TRAY_CALENDAR_LABEL,
@@ -186,7 +193,7 @@ pub fn install_tray_calendar(app: &App) -> Result<(), Box<dyn std::error::Error>
     .accept_first_mouse(true)
     .build()?;
 
-    let handle = app.handle().clone();
+    let handle = app.clone();
     window.on_window_event(move |event| match event {
         WindowEvent::Focused(false) => {
             if show_blur_guarded() {
@@ -204,7 +211,7 @@ pub fn install_tray_calendar(app: &App) -> Result<(), Box<dyn std::error::Error>
     });
     #[cfg(target_os = "macos")]
     configure_calendar_panel(&window);
-    Ok(())
+    Ok(window)
 }
 
 fn apply_tray(app: &AppHandle, title: &str, tooltip: &str) -> Result<(), String> {

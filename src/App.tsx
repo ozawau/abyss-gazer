@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LocaleProvider, publishSystemSettings, useI18n } from "./components/LocaleProvider";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -64,6 +64,10 @@ function ViewSlot({
 
 function MainApp() {
   const { locale, t } = useI18n();
+
+  useLayoutEffect(() => {
+    void getCurrentWindow().show();
+  }, []);
   const [activeView, setActiveView] = useState<ViewId>("checkin");
   const [tasksSubPage, setTasksSubPage] = useState<TasksSubPage>("active");
   const [mountedViews, setMountedViews] = useState<ReadonlySet<ViewId>>(

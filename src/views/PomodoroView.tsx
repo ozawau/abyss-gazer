@@ -412,6 +412,33 @@ export function PomodoroView({
     const task = selectedTaskRef.current;
     if (!task) return;
 
+    const breakUnderway =
+      isBreakPhase(phaseRef.current) &&
+      (statusRef.current === "running" || statusRef.current === "paused");
+    if (breakUnderway) {
+      void (async () => {
+        setError(null);
+        finishingRef.current = true;
+        setStatus("idle");
+        if (startedAtRef.current != null) {
+          await persistSession(false);
+        }
+        creditedTenthsRef.current = 0;
+        const now = Date.now();
+        startedAtRef.current = now;
+        sliceStartedAtRef.current = now;
+        sessionTaskIdRef.current = task.id;
+        phaseRef.current = "focus";
+        setPhase("focus");
+        const next = plannedFor("focus", settingsRef.current);
+        plannedRef.current = next;
+        setRemaining(next);
+        finishingRef.current = false;
+        setStatus("running");
+      })();
+      return;
+    }
+
     const continuingFocus =
       phaseRef.current === "focus" && statusRef.current === "running";
 

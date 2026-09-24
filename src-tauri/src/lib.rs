@@ -2,7 +2,7 @@ mod commands;
 mod db;
 mod system_config;
 
-use commands::tray::{install_pomodoro_tray, install_tray_calendar};
+use commands::tray::install_pomodoro_tray;
 use db::{get_db_path, init_db, DbState};
 use std::sync::Mutex;
 use tauri::Manager;
@@ -31,7 +31,6 @@ pub fn run() {
                 db_path: Mutex::new(db_path),
             });
             install_pomodoro_tray(app)?;
-            install_tray_calendar(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -398,13 +398,16 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
             return Ok(());
         };
         let state = app_for_sync.state::<DbState>();
-        let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-        let db_path = state
-            .db_path
-            .lock()
-            .map_err(|e| e.to_string())?
-            .clone();
-        checkpoint_db(&conn)?;
+        let db_path = {
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            let db_path = state
+                .db_path
+                .lock()
+                .map_err(|e| e.to_string())?
+                .clone();
+            checkpoint_db(&conn)?;
+            db_path
+        };
         let sync_result = match method {
             SyncMethod::Local => {
                 let backup = backup.as_deref().unwrap_or("");
@@ -418,9 +421,11 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
                 sync_git(&data_dir, &message)
             }
         };
-        // `git pull` replaces abyss.db. The open connection then refuses writes
-        // ("attempt to write a readonly database") until it is reopened.
+        // `git pull` replaces abyss.db. Reopen after the pull so later writes
+        // do not hit a stale connection. The lock is not held during the pull,
+        // or the main-thread commands beachball until git finishes.
         if matches!(method, SyncMethod::Git) {
+            let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
             match open_db(&db_path) {
                 Ok(fresh) => *conn = fresh,
                 Err(e) => {
