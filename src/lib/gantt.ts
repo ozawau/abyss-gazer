@@ -285,8 +285,19 @@ export function ganttContinuousBarLayout(
   range: GanttRange,
   firstFocusStarts: ReadonlyMap<string, number>,
   today: Date = startOfLocalDay(new Date()),
+  sessions: readonly PomodoroSession[] = [],
 ): GanttContinuousBarLayout | null {
-  const focusStart = firstFocusStarts.get(task.id);
+  let focusStart = firstFocusStarts.get(task.id);
+  if (focusStart == null) {
+    for (const session of sessions) {
+      if (session.task_id !== task.id || session.kind !== "focus" || !session.completed) {
+        continue;
+      }
+      if (focusStart == null || session.started_at < focusStart) {
+        focusStart = session.started_at;
+      }
+    }
+  }
   const startMs = task.start_at ?? focusStart;
   const todayDay = startOfLocalDay(today);
 

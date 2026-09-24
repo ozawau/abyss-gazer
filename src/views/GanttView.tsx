@@ -124,6 +124,11 @@ export function GanttView({
     return { ...baseRange, columnWidth: timelineWidth / count };
   }, [baseRange, timelineWidth]);
 
+  const focusRevision = useMemo(
+    () => tasks.reduce((sum, task) => sum + (task.completed_pomodoros ?? 0), 0),
+    [tasks],
+  );
+
   useEffect(() => {
     let cancelled = false;
     listFirstCompletedFocusStarts()
@@ -140,7 +145,7 @@ export function GanttView({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [focusRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,7 +160,7 @@ export function GanttView({
     return () => {
       cancelled = true;
     };
-  }, [baseRange]);
+  }, [baseRange, focusRevision]);
 
   const sessionTaskIds = useMemo(
     () => new Set(sessions.map((session) => session.task_id)),
@@ -169,7 +174,7 @@ export function GanttView({
     }
     if (
       activityMode === "continuous" &&
-      ganttContinuousBarLayout(task, range, firstFocusStarts, today) != null
+      ganttContinuousBarLayout(task, range, firstFocusStarts, today, sessions) != null
     ) {
       return true;
     }
@@ -484,6 +489,46 @@ export function GanttView({
   );
 }
 
+function occupiedSpan(lane: {
+  bar: { left: number; width: number } | null;
+  marks: { left: number; width: number }[];
+}): { left: number; right: number } | null {
+  let left = Infinity;
+  let right = -Infinity;
+  if (lane.bar) {
+    left = Math.min(left, lane.bar.left);
+    right = Math.max(right, lane.bar.left + lane.bar.width);
+  }
+  for (const mark of lane.marks) {
+    left = Math.min(left, mark.left);
+    right = Math.max(right, mark.left + mark.width);
+  }
+  if (right < left) return null;
+  return { left, right };
+}
+
+/** Share a row when bars do not overlap, so idle days do not keep an empty lane. */
+function packGanttLanes(
+  lanes: {
+    bar: { left: number; width: number } | null;
+    marks: { left: number; width: number }[];
+  }[],
+): number[] {
+  const placed = lanes
+    .map((lane, index) => ({ index, span: occupiedSpan(lane) }))
+    .filter((item): item is { index: number; span: { left: number; right: number } } => item.span != null)
+    .sort((a, b) => a.span.left - b.span.left || a.span.right - b.span.right);
+  const laneEnds: number[] = [];
+  const assignment = lanes.map(() => 0);
+  for (const item of placed) {
+    const open = laneEnds.findIndex((end) => end <= item.span.left);
+    const lane = open >= 0 ? open : laneEnds.length;
+    laneEnds[lane] = item.span.right;
+    assignment[item.index] = lane;
+  }
+  return assignment;
+}
+
 function GanttParentRowView({
   row,
   activityMode,
@@ -518,7 +563,7 @@ function GanttParentRowView({
   const lanes = items.map((task) => {
     const continuousBar =
       activityMode === "continuous"
-        ? ganttContinuousBarLayout(task, range, firstFocusStarts, today)
+        ? ganttContinuousBarLayout(task, range, firstFocusStarts, today, sessions)
         : null;
     return {
       task,
@@ -531,8 +576,9 @@ function GanttParentRowView({
       color: ganttTaskColor(task.id),
     };
   });
-  const laneCount = Math.max(lanes.length, 1);
-  const stacked = lanes.length > 1;
+  const laneIndex = packGanttLanes(lanes);
+  const laneCount = Math.max(1, ...laneIndex.map((index) => index + 1));
+  const stacked = laneCount > 1;
   const parentColor = ganttTaskColor(parent.id);
   const childCount = items.some((item) => item.id !== parent.id)
     ? items.length
@@ -598,12 +644,13 @@ function GanttParentRowView({
           const category = lane.task.category_id
             ? categoryMap.get(lane.task.category_id)
             : null;
+          if (!lane.bar && lane.marks.length === 0) return null;
           return (
             <div
               key={lane.task.id}
               className="gantt-lane"
               style={{
-                top: `${index * 2.15}rem`,
+                top: `${laneIndex[index]! * 2.15}rem`,
                 height: "2.15rem",
               }}
             >
