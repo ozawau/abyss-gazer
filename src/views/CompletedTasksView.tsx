@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
+import { TaskPomodoroClocks } from "../components/ClockEstimate";
 import { TaskLineageTitle } from "../components/TaskLineageTitle";
 import { TaskRowMenu } from "../components/TaskRowMenu";
 import { useI18n } from "../components/LocaleProvider";
@@ -319,6 +320,10 @@ export function CompletedTasksView({
                     ) : (
                       <span className="completed-meta-muted">{t("common.uncategorized")}</span>
                     )}
+                    <TaskPomodoroClocks
+                      estimate={task.estimate_pomodoros ?? 0}
+                      completed={task.completed_pomodoros ?? 0}
+                    />
                     <span>
                       {t("completed.finished", { time: formatDateTime(task.completed_at ?? task.updated_at, locale) })}
                     </span>

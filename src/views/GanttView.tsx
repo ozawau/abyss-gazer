@@ -489,6 +489,12 @@ export function GanttView({
   );
 }
 
+function formatGanttMarkCount(value: number): string {
+  const tenths = Math.round(value * 10);
+  if (!Number.isFinite(tenths)) return "0.0";
+  return (tenths / 10).toFixed(1);
+}
+
 function occupiedSpan(lane: {
   bar: { left: number; width: number } | null;
   marks: { left: number; width: number }[];
@@ -667,7 +673,7 @@ function GanttParentRowView({
                   }}
                   title={
                     mark.count > 0
-                      ? t("calendar.pomodorosDone", { count: mark.count })
+                      ? t("calendar.pomodorosDone", { count: formatGanttMarkCount(mark.count) })
                       : mark.kind === "done"
                         ? t("gantt.finished")
                         : t("gantt.focused")
@@ -689,7 +695,7 @@ function GanttParentRowView({
                     });
                   }}
                 >
-                  {mark.count > 0 ? mark.count : ""}
+                  {mark.count > 0 ? formatGanttMarkCount(mark.count) : ""}
                 </span>
               ))}
               {lane.bar && (

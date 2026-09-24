@@ -421,9 +421,10 @@ export function ganttActivityMarks(
     if (session.task_id !== task.id) continue;
     const day = startOfLocalDay(new Date(session.started_at));
     const key = dayKey(day);
+    const credit = session.credit ?? 1;
     const prev = days.get(key);
-    if (prev) prev.count += 1;
-    else days.set(key, { day, count: 1 });
+    if (prev) prev.count += credit;
+    else days.set(key, { day, count: credit });
   }
   const doneKey =
     task.status === "done"

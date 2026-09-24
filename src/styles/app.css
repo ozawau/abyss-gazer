@@ -3374,7 +3374,7 @@ body.is-task-dragging * {
   top: 0.35rem;
   bottom: 0.35rem;
   height: auto;
-  min-width: 1.15rem;
+  min-width: 1.9rem;
   border-radius: 4px;
 }
 
