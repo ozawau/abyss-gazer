@@ -308,6 +308,8 @@ export interface SystemSettings {
   launchAtLogin: boolean;
   /** `system` follows the OS language. */
   language: LanguagePreference;
+  /** Wide layout only. Narrow screens keep the bottom tab bar. */
+  sidebarCollapsed: boolean;
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -321,6 +323,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   ganttActivityMode: "discrete",
   launchAtLogin: false,
   language: "system",
+  sidebarCollapsed: false,
 };
 
 export function getSystemSettings(): Promise<SystemSettings> {

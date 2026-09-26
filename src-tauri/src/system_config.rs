@@ -39,6 +39,9 @@ pub struct SystemSettings {
     /// `system` follows the OS language. Otherwise `zh` or `en`.
     #[serde(default = "default_language")]
     pub language: String,
+    /// Remember whether the desktop sidebar is collapsed. Narrow layouts ignore this.
+    #[serde(default)]
+    pub sidebar_collapsed: bool,
 }
 
 fn default_week_starts_on() -> u8 {
@@ -66,6 +69,7 @@ impl Default for SystemSettings {
             gantt_activity_mode: default_gantt_activity_mode(),
             launch_at_login: false,
             language: default_language(),
+            sidebar_collapsed: false,
         }
     }
 }
@@ -128,6 +132,7 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
         gantt_activity_mode: normalize_gantt_activity_mode(&settings.gantt_activity_mode),
         launch_at_login: settings.launch_at_login,
         language: normalize_language(&settings.language),
+        sidebar_collapsed: settings.sidebar_collapsed,
     }
 }
 

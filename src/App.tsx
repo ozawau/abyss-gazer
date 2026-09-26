@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LocaleProvider, publishSystemSettings, useI18n } from "./components/LocaleProvider";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -104,6 +104,7 @@ function MainApp() {
     useState<CategoryFilter>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const systemReady = useRef(false);
   const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings>(
     DEFAULT_POMODORO_SETTINGS,
   );
@@ -137,8 +138,10 @@ function MainApp() {
     getSystemSettings()
       .then((settings) => {
         if (!cancelled) {
+          systemReady.current = true;
           setSystemSettings(settings);
           publishSystemSettings(settings);
+          setSidebarOpen(!settings.sidebarCollapsed);
         }
       })
       .catch(() => {
@@ -291,6 +294,19 @@ function MainApp() {
     }
   }
 
+  function handleToggleSidebar() {
+    const nextOpen = !sidebarOpen;
+    setSidebarOpen(nextOpen);
+    if (!systemReady.current) return;
+    setSystemSettings((prev) => {
+      const next = { ...prev, sidebarCollapsed: !nextOpen };
+      void persistSystemSettings(next).catch((err) => {
+        setLoadError(String(err));
+      });
+      return next;
+    });
+  }
+
   const immersivePomodoro =
     activeView === "pomodoro" && pomodoroFullscreen;
 
@@ -309,7 +325,7 @@ function MainApp() {
           subNavOpen={subNavOpen}
           onToggleSubNav={handleToggleSubNav}
           onOpenSettings={() => setSettingsOpen(true)}
-          onToggleSidebar={() => setSidebarOpen((open) => !open)}
+          onToggleSidebar={handleToggleSidebar}
           collapsed={sidebarCollapsed}
           pomodoroTick={pomodoroTick}
         />
