@@ -19,3 +19,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Called from Rust by class and field name.
+-keep class com.abyssgazer.desktop.DirectoryPicker { *; }

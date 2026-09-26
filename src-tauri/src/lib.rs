@@ -71,6 +71,7 @@ pub fn run() {
             commands::sync::get_default_data_dir,
             commands::sync::get_active_data_dir,
             commands::sync::set_data_directory,
+            commands::directory::pick_directory,
             commands::sync::run_data_sync,
             commands::holidays::read_cn_holidays_cache,
             commands::holidays::write_cn_holidays_cache,

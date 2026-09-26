@@ -1,4 +1,5 @@
 pub mod categories;
+pub mod directory;
 pub mod checkins;
 pub mod holidays;
 pub mod pomodoro;

@@ -8,6 +8,7 @@ import {
   getDefaultDataDir,
   getPomodoroSettings,
   getSystemSettings,
+  pickDirectory,
   PomodoroSettings,
   setDataDirectory,
   setPomodoroSettings,
@@ -182,15 +183,30 @@ export function SettingsDialog({
     patchPomodoro({ [key]: value } as Partial<PomodoroSettings>);
   }
 
+  async function chooseFolder(
+    title: string,
+    defaultPath?: string,
+  ): Promise<string | null> {
+    if (/Android/i.test(navigator.userAgent)) {
+      return pickDirectory();
+    }
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title,
+      defaultPath,
+    });
+    if (selected == null || Array.isArray(selected)) return null;
+    return selected;
+  }
+
   async function chooseDataDir() {
     try {
-      const selected = await openDialog({
-        directory: true,
-        multiple: false,
-        title: t("settings.chooseDataDir"),
-        defaultPath: activeDataDir || defaultDataDir || undefined,
-      });
-      if (selected == null || Array.isArray(selected)) return;
+      const selected = await chooseFolder(
+        t("settings.chooseDataDir"),
+        activeDataDir || defaultDataDir || undefined,
+      );
+      if (selected == null) return;
       setBusy(true);
       setError(null);
       const saved = await setDataDirectory(selected);
@@ -255,13 +271,11 @@ export function SettingsDialog({
 
   async function chooseBackupDir() {
     try {
-      const selected = await openDialog({
-        directory: true,
-        multiple: false,
-        title: t("settings.chooseBackup"),
-        defaultPath: system.localBackupDir || undefined,
-      });
-      if (selected == null || Array.isArray(selected)) return;
+      const selected = await chooseFolder(
+        t("settings.chooseBackup"),
+        system.localBackupDir || undefined,
+      );
+      if (selected == null) return;
       patchSystem({ localBackupDir: selected });
     } catch (err) {
       setError(String(err));

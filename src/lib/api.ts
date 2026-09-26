@@ -345,6 +345,10 @@ export function setDataDirectory(path: string): Promise<SystemSettings> {
   return invoke("set_data_directory", { path });
 }
 
+export function pickDirectory(): Promise<string | null> {
+  return invoke("pick_directory");
+}
+
 export function runDataSync(): Promise<void> {
   return invoke("run_data_sync");
 }

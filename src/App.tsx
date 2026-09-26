@@ -103,6 +103,7 @@ function MainApp() {
   const [calendarCategoryFilter, setCalendarCategoryFilter] =
     useState<CategoryFilter>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings>(
     DEFAULT_POMODORO_SETTINGS,
   );
@@ -202,6 +203,7 @@ function MainApp() {
   const narrow = useNarrowViewport();
   const showTasksSubNav =
     activeView === "tasks" && (narrow || !!subNavOpen.tasks);
+  const sidebarCollapsed = !narrow && !sidebarOpen;
 
   const handlePomodoroTick = useCallback((tick: PomodoroTick) => {
     setPomodoroTick(tick);
@@ -295,8 +297,8 @@ function MainApp() {
   return (
     <div
       className={`shell${showTasksSubNav ? "" : " no-subnav"}${
-        immersivePomodoro ? " is-pomodoro-fullscreen" : ""
-      }`}
+        sidebarCollapsed ? " sidebar-collapsed" : ""
+      }${immersivePomodoro ? " is-pomodoro-fullscreen" : ""}`}
     >
       {!immersivePomodoro && (
         <Sidebar
@@ -307,6 +309,8 @@ function MainApp() {
           subNavOpen={subNavOpen}
           onToggleSubNav={handleToggleSubNav}
           onOpenSettings={() => setSettingsOpen(true)}
+          onToggleSidebar={() => setSidebarOpen((open) => !open)}
+          collapsed={sidebarCollapsed}
           pomodoroTick={pomodoroTick}
         />
       )}
