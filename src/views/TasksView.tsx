@@ -15,7 +15,7 @@ import {
 } from "../components/ClockEstimate";
 import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
-import { TaskRowMenu } from "../components/TaskRowMenu";
+import { TaskRowMenu, type TaskMoveAction } from "../components/TaskRowMenu";
 import { useI18n } from "../components/LocaleProvider";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import {
@@ -124,6 +124,39 @@ function siblingTasks(
       return true;
     })
     .sort((a, b) => a.sort_order - b.sort_order || a.created_at - b.created_at);
+}
+
+function visibleSiblings(task: Task, tasks: Task[], visibleIds: Set<string>): Task[] {
+  const priority = normalizePriority(task.priority) ?? "medium";
+  return siblingTasks(
+    tasks,
+    task.parent_id,
+    task.parent_id ? undefined : priority,
+  ).filter((item) => visibleIds.has(item.id));
+}
+
+/** `undefined` means the task is already at that end. `null` appends. */
+function beforeIdForMove(
+  siblings: Task[],
+  index: number,
+  action: TaskMoveAction,
+): string | null | undefined {
+  const last = siblings.length - 1;
+  if (index < 0) return undefined;
+  if (action === "top") {
+    if (index === 0) return undefined;
+    return siblings[0]?.id;
+  }
+  if (action === "up") {
+    if (index === 0) return undefined;
+    return siblings[index - 1]?.id;
+  }
+  if (action === "down") {
+    if (index >= last) return undefined;
+    return siblings[index + 2]?.id ?? null;
+  }
+  if (index >= last) return undefined;
+  return null;
 }
 
 function owningSibling(
@@ -238,6 +271,8 @@ function dropTargetFromPoint(
   const next = roots.slice(idx + 1).find((task) => task.id !== dragging.id);
   return { priority, parentId: null, beforeId: next?.id ?? null };
 }
+
+const TASK_DRAG_ENABLED = !/Android/i.test(navigator.userAgent);
 
 export function TasksView({
   tasks,
@@ -529,6 +564,69 @@ export function TasksView({
     }
   }
 
+  function moveAvailability(task: Task) {
+    const siblings = visibleSiblings(
+      task,
+      tasks,
+      new Set(boardTasks.map((item) => item.id)),
+    );
+    const index = siblings.findIndex((item) => item.id === task.id);
+    const last = siblings.length - 1;
+    return {
+      canTop: index > 0,
+      canUp: index > 0,
+      canDown: index >= 0 && index < last,
+      canBottom: index >= 0 && index < last,
+    };
+  }
+
+  async function setTaskPriority(task: Task, priority: TaskPriority) {
+    if (task.parent_id || task.priority === priority || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const rows = await reorderTask({
+        id: task.id,
+        priority,
+        before_id: null,
+      });
+      onTasksChange(rows);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveTask(task: Task, action: TaskMoveAction) {
+    if (busy) return;
+    const siblings = visibleSiblings(
+      task,
+      tasks,
+      new Set(boardTasks.map((item) => item.id)),
+    );
+    const beforeId = beforeIdForMove(
+      siblings,
+      siblings.findIndex((item) => item.id === task.id),
+      action,
+    );
+    if (beforeId === undefined) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const rows = await reorderTask({
+        id: task.id,
+        priority: normalizePriority(task.priority) ?? "medium",
+        before_id: beforeId,
+      });
+      onTasksChange(rows);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleStatus(task: Task) {
     setBusy(true);
     setError(null);
@@ -679,7 +777,7 @@ export function TasksView({
     e: ReactPointerEvent<HTMLLIElement>,
     task: Task,
   ) {
-    if (e.button !== 0 || busy) return;
+    if (!TASK_DRAG_ENABLED || e.button !== 0 || busy) return;
     const target = e.target as HTMLElement;
     if (
       target.closest(
@@ -861,19 +959,21 @@ export function TasksView({
                   ) : (
                     <span className="task-toggle-spacer" aria-hidden />
                   )}
-                  <button
-                    type="button"
-                    className="drag-handle"
-                    title={
-                      isSubtask
-                        ? t("tasks.dragChild")
-                        : t("tasks.dragRoot")
-                    }
-                    aria-label={t("tasks.dragLabel", { title: task.title })}
-                    disabled={busy}
-                  >
-                    ⋮⋮
-                  </button>
+                  {TASK_DRAG_ENABLED && (
+                    <button
+                      type="button"
+                      className="drag-handle"
+                      title={
+                        isSubtask
+                          ? t("tasks.dragChild")
+                          : t("tasks.dragRoot")
+                      }
+                      aria-label={t("tasks.dragLabel", { title: task.title })}
+                      disabled={busy}
+                    >
+                      ⋮⋮
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={`task-check${task.status === "done" ? " is-done" : ""}`}
@@ -1158,6 +1258,7 @@ export function TasksView({
 
       {rowMenu && (
         <TaskRowMenu
+          key={`${rowMenu.task.id}:${rowMenu.x}:${rowMenu.y}`}
           x={rowMenu.x}
           y={rowMenu.y}
           onClose={() => setRowMenu(null)}
@@ -1172,6 +1273,23 @@ export function TasksView({
           onDelete={() => {
             setPendingDeleteTask(rowMenu.task);
             setRowMenu(null);
+          }}
+          priorityMenu={{
+            current: normalizePriority(rowMenu.task.priority) ?? "medium",
+            enabled: !rowMenu.task.parent_id,
+            onSelect: (priority) => {
+              const task = rowMenu.task;
+              setRowMenu(null);
+              void setTaskPriority(task, priority);
+            },
+          }}
+          moveMenu={{
+            ...moveAvailability(rowMenu.task),
+            onSelect: (action) => {
+              const task = rowMenu.task;
+              setRowMenu(null);
+              void moveTask(task, action);
+            },
           }}
         />
       )}

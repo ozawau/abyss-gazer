@@ -70,7 +70,12 @@ textarea {
   grid-template-columns: 3.25rem 1fr;
 }
 
-.shell.is-pomodoro-fullscreen {
+.shell.is-pomodoro-fullscreen,
+.shell.no-subnav.is-pomodoro-fullscreen,
+.shell.sidebar-collapsed.is-pomodoro-fullscreen,
+.shell.no-subnav.sidebar-collapsed.is-pomodoro-fullscreen {
+  display: flex;
+  flex-direction: column;
   grid-template-columns: 1fr;
 }
 
@@ -428,6 +433,9 @@ textarea {
 }
 
 .main.is-immersive {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
   padding: clamp(0.75rem, 2vw, 1.5rem);
   display: flex;
   flex-direction: column;
@@ -435,8 +443,11 @@ textarea {
 
 .main.is-immersive .view-slot:not(.is-hidden) {
   flex: 1;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   display: flex;
+  flex-direction: column;
 }
 
 .view {
@@ -1234,7 +1245,10 @@ textarea {
 }
 
 .task-context-menu button {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   width: 100%;
   padding: 0.4rem 0.6rem;
   border: none;
@@ -1250,8 +1264,48 @@ textarea {
   background: var(--bg-hover);
 }
 
+.task-context-menu button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.task-context-menu button:disabled:hover {
+  background: transparent;
+}
+
 .task-context-menu button.is-danger {
   color: #b91c1c;
+}
+
+.task-context-menu button.is-current {
+  font-weight: 600;
+}
+
+.task-menu-branch {
+  position: relative;
+}
+
+.task-menu-flyout {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: calc(100% - 0.15rem);
+  min-width: 8.75rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+}
+
+.task-menu-branch.opens-left .task-menu-flyout {
+  left: auto;
+  right: calc(100% - 0.15rem);
+}
+
+.task-menu-branch.opens-up .task-menu-flyout {
+  top: auto;
+  bottom: 0;
 }
 
 .task-detail-due-row {
