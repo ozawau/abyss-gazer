@@ -2,11 +2,13 @@ mod commands;
 mod db;
 mod system_config;
 
+#[cfg(desktop)]
 use commands::tray::install_pomodoro_tray;
 use db::{get_db_path, init_db, DbState};
 use std::sync::Mutex;
 use tauri::Manager;
 
+#[cfg(desktop)]
 fn autostart_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let mut builder = tauri_plugin_autostart::Builder::new().app_name("Abyss Gazer");
     #[cfg(target_os = "macos")]
@@ -20,16 +22,22 @@ fn autostart_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(autostart_plugin())
+        .plugin(tauri_plugin_dialog::init());
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(autostart_plugin());
+    }
+    builder
         .setup(|app| {
             let (conn, db_path) = init_db(app.handle())?;
             app.manage(DbState {
                 conn: Mutex::new(conn),
                 db_path: Mutex::new(db_path),
             });
+            #[cfg(desktop)]
             install_pomodoro_tray(app)?;
             Ok(())
         })

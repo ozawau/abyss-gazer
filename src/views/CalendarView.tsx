@@ -44,6 +44,7 @@ import {
 } from "../lib/cnStatutoryDay";
 import { formatLunarDayShort } from "../lib/dateDisplay";
 import { formatTaskLineage, leafTasks } from "../lib/taskTree";
+import { useNarrowViewport } from "../lib/viewport";
 
 interface CalendarViewProps {
   tasks: Task[];
@@ -75,6 +76,7 @@ export function CalendarView({
   useCnHolidayRevision();
   const viewRef = useRef<HTMLDivElement>(null);
   const today = useMemo(() => startOfLocalDay(new Date()), []);
+  const narrow = useNarrowViewport();
   const [mode, setMode] = useState<CalendarMode>("month");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date>(() =>
@@ -84,6 +86,10 @@ export function CalendarView({
   const [hideDone, setHideDone] = useState(false);
   const [sessions, setSessions] = useState<PomodoroSession[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (narrow && mode === "year") setMode("month");
+  }, [narrow, mode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -238,7 +244,9 @@ export function CalendarView({
                 type="button"
                 role="tab"
                 aria-selected={mode === id}
-                className={`calendar-mode-tab${mode === id ? " is-active" : ""}`}
+                className={`calendar-mode-tab${id === "year" ? " calendar-mode-year" : ""}${
+                  mode === id ? " is-active" : ""
+                }`}
                 onClick={() => setMode(id)}
               >
                 {label}

@@ -7,8 +7,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex as SyncGate;
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State};
+#[cfg(desktop)]
 use tauri_plugin_autostart::ManagerExt;
 
 /// Only one sync runs at a time. A second request returns immediately.
@@ -136,6 +138,13 @@ fn disable_sync(app: &AppHandle) -> Result<(), String> {
 /// macOS writes a LaunchAgent plist. Windows writes the current-user Run key,
 /// with the exe path quoted.
 pub fn apply_launch_at_login(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(mobile)]
+    {
+        let _ = (app, enabled);
+        return Ok(());
+    }
+    #[cfg(desktop)]
+    {
     let autolaunch = app.autolaunch();
     if enabled {
         autolaunch
@@ -159,14 +168,23 @@ pub fn apply_launch_at_login(app: &AppHandle, enabled: bool) -> Result<(), Strin
         }
         Ok(())
     }
+    }
 }
 
+#[cfg(target_os = "macos")]
 const LAUNCH_AT_LOGIN_LABEL: &str = "Abyss Gazer";
 
 /// Live OS state. macOS checks the LaunchAgent plist and whether System
 /// Settings has disabled that service. Windows checks the Run key and the
 /// Task Manager startup switch. A failed lookup leaves the saved value alone.
 fn os_launch_at_login_enabled(app: &AppHandle) -> Result<bool, String> {
+    #[cfg(mobile)]
+    {
+        let _ = app;
+        return Ok(false);
+    }
+    #[cfg(desktop)]
+    {
     let registered = app
         .autolaunch()
         .is_enabled()
@@ -179,6 +197,7 @@ fn os_launch_at_login_enabled(app: &AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
     Ok(true)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -242,6 +261,7 @@ fn current_uid() -> Option<u32> {
         .ok()
 }
 
+#[cfg(target_os = "macos")]
 fn command_output(cmd: &mut Command, timeout: Duration) -> Option<std::process::Output> {
     let mut child = cmd
         .stdin(Stdio::null())
@@ -264,6 +284,7 @@ fn command_output(cmd: &mut Command, timeout: Duration) -> Option<std::process::
     }
 }
 
+#[cfg(target_os = "macos")]
 fn service_marked_disabled(text: &str, label: &str) -> bool {
     let needle = format!("\"{label}\"");
     for line in text.lines() {

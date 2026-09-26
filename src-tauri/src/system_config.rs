@@ -133,25 +133,43 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
 
 /// Default data root (database). Config files live in `~/.config/abyss-gazer`.
 pub fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let home = home_dir(app)?;
+    #[cfg(target_os = "android")]
+    {
+        app.path()
+            .app_data_dir()
+            .map_err(|e| format!("resolve data dir: {e}"))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let home = home_dir(app)?;
 
-    #[cfg(target_os = "macos")]
-    let dir = home.join("Library/Application Support/Abyss Gazer");
+        #[cfg(target_os = "macos")]
+        let dir = home.join("Library/Application Support/Abyss Gazer");
 
-    #[cfg(target_os = "windows")]
-    let dir = home.join("AppData/Roaming/Abyss Gazer");
+        #[cfg(target_os = "windows")]
+        let dir = home.join("AppData/Roaming/Abyss Gazer");
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let dir = home.join(".local/share/abyss-gazer");
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let dir = home.join(".local/share/abyss-gazer");
 
-    Ok(dir)
+        Ok(dir)
+    }
 }
 
 /// Location of `system.json`: `~/.config/abyss-gazer`.
 pub fn resolve_system_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    #[cfg(target_os = "android")]
+    {
+        return app
+            .path()
+            .app_config_dir()
+            .map_err(|e| format!("resolve config dir: {e}"));
+    }
+    #[cfg(not(target_os = "android"))]
     Ok(home_dir(app)?.join(".config").join("abyss-gazer"))
 }
 
+#[cfg(not(target_os = "android"))]
 fn home_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .home_dir()

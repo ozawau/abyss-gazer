@@ -11,11 +11,13 @@ import {
   addDays,
   addMonths,
   startOfLocalDay,
+  startOfWeek,
   type WeekStartsOn,
 } from "../lib/calendar";
 import { formatShortDate } from "../lib/dateDisplay";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import { useI18n } from "../components/LocaleProvider";
+import type { AppLocale } from "../lib/i18n";
 import {
   buildGanttDayRange,
   buildGanttRange,
@@ -38,6 +40,7 @@ import {
   type GanttRange,
   type GanttScale,
 } from "../lib/gantt";
+import { useNarrowViewport } from "../lib/viewport";
 
 interface GanttViewProps {
   tasks: Task[];
@@ -69,6 +72,7 @@ export function GanttView({
   onCategoryFilterChange,
 }: GanttViewProps) {
   const { locale, t } = useI18n();
+  const narrow = useNarrowViewport();
   const today = useMemo(() => startOfLocalDay(new Date()), []);
   const [scale, setScale] = useState<GanttScale | null>("month");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
@@ -111,12 +115,22 @@ export function GanttView({
     return map;
   }, [categories]);
 
+  useEffect(() => {
+    if (!narrow) return;
+    setScale("week");
+    setCustomRange(null);
+  }, [narrow]);
+
   const baseRange = useMemo(() => {
+    if (narrow) {
+      const start = startOfWeek(cursor, weekStartsOn);
+      return buildGanttDayRange(start, addDays(start, 6), locale);
+    }
     if (scale == null && customRange) {
       return buildGanttDayRange(customRange.start, customRange.end, locale);
     }
     return buildGanttRange(scale ?? "month", cursor, weekStartsOn, locale);
-  }, [scale, cursor, weekStartsOn, customRange, locale]);
+  }, [narrow, scale, cursor, weekStartsOn, customRange, locale]);
 
   const range = useMemo(() => {
     const count = Math.max(baseRange.columns.length, 1);
@@ -271,6 +285,10 @@ export function GanttView({
   }
 
   function goPrev() {
+    if (narrow) {
+      setCursor((d) => addDays(d, -7));
+      return;
+    }
     if (scale == null) {
       const span = daysBetween(range.start, range.end) + 1;
       applyCustom(addDays(range.start, -span), addDays(range.end, -span));
@@ -282,6 +300,10 @@ export function GanttView({
   }
 
   function goNext() {
+    if (narrow) {
+      setCursor((d) => addDays(d, 7));
+      return;
+    }
     if (scale == null) {
       const span = daysBetween(range.start, range.end) + 1;
       applyCustom(addDays(range.start, span), addDays(range.end, span));
@@ -308,7 +330,11 @@ export function GanttView({
           <p>{t("gantt.hint")}</p>
         </div>
         <div className="calendar-toolbar">
-          <div className="calendar-mode-tabs" role="tablist" aria-label={t("gantt.scale")}>
+          <div
+            className={`calendar-mode-tabs${narrow ? " is-hidden-narrow" : ""}`}
+            role="tablist"
+            aria-label={t("gantt.scale")}
+          >
             {SCALE_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -418,7 +444,20 @@ export function GanttView({
         <p className="gantt-empty">{emptyMessage}</p>
       )}
 
-      <div className="gantt-board" ref={boardRef}>
+      {narrow && visibleRows.length > 0 && (
+        <ul className="gantt-week-list">
+          {visibleRows.map((row) => (
+            <GanttWeekGroup
+              key={row.parent.id}
+              row={row}
+              onSelectTask={onSelectTask}
+              onStartPomodoro={onStartPomodoro}
+            />
+          ))}
+        </ul>
+      )}
+
+      <div className={`gantt-board${narrow ? " is-hidden-narrow" : ""}`} ref={boardRef}>
         <div className="gantt-scroll">
           <div className="gantt-grid">
             <div className="gantt-header-row">
@@ -487,6 +526,53 @@ export function GanttView({
       )}
     </div>
   );
+}
+
+function GanttWeekGroup({
+  row,
+  onSelectTask,
+  onStartPomodoro,
+}: {
+  row: GanttParentRow;
+  onSelectTask: (id: string | null) => void;
+  onStartPomodoro: (taskId: string) => void;
+}) {
+  const { locale, t } = useI18n();
+  return (
+    <li className="gantt-week-group">
+      {row.items.map((task) => (
+        <div
+          key={task.id}
+          className={`gantt-week-row${task.id !== row.parent.id ? " is-child" : ""}`}
+        >
+          <button
+            type="button"
+            className={`gantt-week-title${task.status === "done" ? " is-done" : ""}`}
+            onClick={() => onSelectTask(task.id)}
+          >
+            <span>{task.title}</span>
+            <em>{taskSpanLabel(task, locale)}</em>
+          </button>
+          <button
+            type="button"
+            className="task-play"
+            title={t("common.startPomodoro")}
+            aria-label={t("tasks.focusTask", { title: task.title })}
+            onClick={() => onStartPomodoro(task.id)}
+          >
+            ▶
+          </button>
+        </div>
+      ))}
+    </li>
+  );
+}
+
+function taskSpanLabel(task: Task, locale: AppLocale): string {
+  const start = task.start_at != null ? formatShortDate(task.start_at, locale) : "";
+  const due = task.due_at != null ? formatShortDate(task.due_at, locale) : "";
+  if (start && due) return `${start} – ${due}`;
+  return start || due;
 }
 
 function formatGanttMarkCount(value: number): string {

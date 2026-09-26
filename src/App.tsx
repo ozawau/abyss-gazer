@@ -21,6 +21,7 @@ import { type GanttActivityMode } from "./lib/gantt";
 import { syncPomodoroPresence } from "./lib/pomodoroPresence";
 import { type PomodoroTick } from "./lib/pomodoroTimer";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
+import { useNarrowViewport } from "./lib/viewport";
 import { formatTaskLineage, taskById } from "./lib/taskTree";
 import type { TasksSubPage } from "./lib/tasksNav";
 import { CompletedTasksView } from "./views/CompletedTasksView";
@@ -66,7 +67,11 @@ function MainApp() {
   const { locale, t } = useI18n();
 
   useLayoutEffect(() => {
-    void getCurrentWindow().show();
+    try {
+      void getCurrentWindow().show();
+    } catch {
+      /* Outside the Tauri webview there is no window to show. */
+    }
   }, []);
   const [activeView, setActiveView] = useState<ViewId>("checkin");
   const [tasksSubPage, setTasksSubPage] = useState<TasksSubPage>("active");
@@ -194,7 +199,9 @@ function MainApp() {
     return task ? formatTaskLineage(task, tasksById) : null;
   }, [pomodoroTask, selectedTask, tasksById]);
 
-  const showTasksSubNav = activeView === "tasks" && !!subNavOpen.tasks;
+  const narrow = useNarrowViewport();
+  const showTasksSubNav =
+    activeView === "tasks" && (narrow || !!subNavOpen.tasks);
 
   const handlePomodoroTick = useCallback((tick: PomodoroTick) => {
     setPomodoroTick(tick);
