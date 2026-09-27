@@ -37,7 +37,9 @@ class MainActivity : TauriActivity() {
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
       )
       view.setPadding(0, bars.top, 0, 0)
-      insets
+      // The WebView also turns this top inset into safe-area-inset-top.
+      // Leaving it in place adds a second blank row under the status bar.
+      insets.inset(0, bars.top, 0, 0)
     }
     ViewCompat.requestApplyInsets(content)
   }

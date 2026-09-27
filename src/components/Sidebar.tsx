@@ -324,6 +324,7 @@ export function Sidebar({
           type="button"
           className="sidebar-settings-btn"
           onClick={onOpenSettings}
+          aria-label={t("common.settings")}
         >
           <SettingsIcon />
           <span>{t("common.settings")}</span>

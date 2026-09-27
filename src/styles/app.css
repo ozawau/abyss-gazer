@@ -845,6 +845,11 @@ textarea {
   background: color-mix(in srgb, var(--bg-panel) 70%, #fff);
 }
 
+html.is-android .tasks-view .task-row {
+  cursor: default;
+  touch-action: pan-y;
+}
+
 .task-toggle,
 .task-toggle-spacer {
   width: 1.15rem;
@@ -1388,10 +1393,8 @@ textarea {
   box-shadow: 0 0 0 2px var(--accent);
 }
 
-@media (max-width: 720px) {
-  .task-create {
-    grid-template-columns: 1fr;
-  }
+html.is-narrow .task-create {
+  grid-template-columns: 1fr;
 }
 
 .priority-boards.is-dragging .task-group {
@@ -2355,7 +2358,7 @@ body.is-task-dragging * {
   text-decoration: line-through;
 }
 
-@media (max-width: 720px) {
+html.is-narrow {
   .shell,
   .shell.no-subnav {
     display: flex;
@@ -2448,18 +2451,36 @@ body.is-task-dragging * {
 
   .sidebar-footer {
     position: fixed;
-    top: calc(0.4rem + env(safe-area-inset-top));
-    right: 0.45rem;
+    top: calc(1.05rem + env(safe-area-inset-top));
+    right: 0.7rem;
     z-index: 40;
+    width: auto;
     padding: 0;
   }
 
+  .shell:not(.no-subnav) .sidebar-footer {
+    top: calc(3.22rem + 1.05rem + env(safe-area-inset-top));
+  }
+
   .sidebar-settings-btn {
-    min-height: 2.25rem;
+    width: 1.7rem;
+    height: 1.7rem;
+    min-height: 0;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+  }
+
+  .sidebar-settings-btn span {
+    display: none;
   }
 
   .sidebar-version {
     display: none;
+  }
+
+  .view-header {
+    padding-right: 2rem;
   }
 
   .tasks-subnav {
@@ -2469,7 +2490,7 @@ body.is-task-dragging * {
     border-right: none;
     border-bottom: 1px solid var(--border);
     margin-top: env(safe-area-inset-top);
-    padding: 0.35rem 4.75rem 0.35rem 0.45rem;
+    padding: 0.35rem 0.45rem;
     gap: 0.25rem;
   }
 
@@ -2487,8 +2508,16 @@ body.is-task-dragging * {
     border-radius: 999px;
   }
 
-  .shell.no-subnav .main {
-    padding-top: calc(2.85rem + env(safe-area-inset-top));
+  &.is-android .tasks-subnav {
+    margin-top: 0;
+  }
+
+  &.is-android .sidebar-footer {
+    top: 1.05rem;
+  }
+
+  &.is-android .shell:not(.no-subnav) .sidebar-footer {
+    top: calc(3.22rem + 1.05rem);
   }
 
   .main {
@@ -2511,7 +2540,7 @@ body.is-task-dragging * {
     height: 2.25rem;
   }
 
-  html.is-android .tasks-view .task-row {
+  &.is-android .tasks-view .task-row {
     display: flex;
     align-items: center;
     gap: 0.28rem;
@@ -2523,41 +2552,42 @@ body.is-task-dragging * {
     touch-action: pan-y;
   }
 
-  html.is-android .tasks-view .task-toggle,
-  html.is-android .tasks-view .task-toggle-spacer {
+  &.is-android .tasks-view .task-toggle,
+  &.is-android .tasks-view .task-toggle-spacer {
     width: 1rem;
     height: 1rem;
     font-size: 0.48rem;
   }
 
-  html.is-android .tasks-view .task-check {
+  &.is-android .tasks-view .task-check,
+  &.is-android .pomodoro-view .task-check {
     width: 0.95rem;
     height: 0.95rem;
   }
 
-  html.is-android .tasks-view .task-play {
+  &.is-android .tasks-view .task-play {
     width: 1.05rem;
     height: 1.05rem;
     font-size: 0.52rem;
   }
 
-  html.is-android .tasks-view .task-main {
+  &.is-android .tasks-view .task-main {
     display: contents;
   }
 
-  html.is-android .tasks-view .task-category-tag {
+  &.is-android .tasks-view .task-category-tag {
     order: 1;
     flex: none;
     gap: 0;
   }
 
-  html.is-android .tasks-view .task-category-name,
-  html.is-android .tasks-view .task-pomodoro-clocks,
-  html.is-android .tasks-view .task-actions {
+  &.is-android .tasks-view .task-category-name,
+  &.is-android .tasks-view .task-pomodoro-clocks,
+  &.is-android .tasks-view .task-actions {
     display: none;
   }
 
-  html.is-android .tasks-view .task-title-btn {
+  &.is-android .tasks-view .task-title-btn {
     order: 2;
     flex: 1;
   }
@@ -4179,7 +4209,7 @@ body.is-task-dragging * {
   line-height: 1.15;
 }
 
-@media (max-width: 720px) {
+html.is-narrow {
   .habit-week {
     overflow: hidden;
   }
