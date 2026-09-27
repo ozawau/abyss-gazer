@@ -112,6 +112,8 @@ function MainApp() {
     DEFAULT_SYSTEM_SETTINGS,
   );
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [dataEpoch, setDataEpoch] = useState(0);
+  const tasksLoadGen = useRef(0);
 
   useEffect(() => {
     initCnHolidayData();
@@ -119,12 +121,13 @@ function MainApp() {
 
   useEffect(() => {
     let cancelled = false;
+    const gen = tasksLoadGen.current;
     listTasks()
       .then((rows) => {
-        if (!cancelled) setTasks(rows);
+        if (!cancelled && tasksLoadGen.current === gen) setTasks(rows);
       })
       .catch((err) => {
-        if (!cancelled) setLoadError(String(err));
+        if (!cancelled && tasksLoadGen.current === gen) setLoadError(String(err));
       });
     getPomodoroSettings()
       .then((settings) => {
@@ -164,9 +167,33 @@ function MainApp() {
       try {
         await runDataSync();
       } catch (err) {
-        if (cancelled) return;
-        setSystemSettings((prev) => ({ ...prev, syncEnabled: false }));
-        setSyncError(String(err));
+        if (!cancelled) {
+          setSystemSettings((prev) => ({ ...prev, syncEnabled: false }));
+          setSyncError(String(err));
+        }
+        inFlight = false;
+        return;
+      }
+      if (cancelled) {
+        inFlight = false;
+        return;
+      }
+      const gen = ++tasksLoadGen.current;
+      try {
+        const rows = await listTasks();
+        if (cancelled || tasksLoadGen.current !== gen) return;
+        setTasks(rows);
+        setDataEpoch((n) => n + 1);
+        try {
+          const pomodoro = await getPomodoroSettings();
+          if (!cancelled && tasksLoadGen.current === gen) {
+            setPomodoroSettings({ ...DEFAULT_POMODORO_SETTINGS, ...pomodoro });
+          }
+        } catch {
+          /* keep the timings already on screen */
+        }
+      } catch (err) {
+        if (!cancelled && tasksLoadGen.current === gen) setLoadError(String(err));
       } finally {
         inFlight = false;
       }
@@ -348,6 +375,7 @@ function MainApp() {
               onStartPomodoro={startPomodoroForTask}
               categoryFilter={tasksCategoryFilter}
               onCategoryFilterChange={setTasksCategoryFilter}
+              dataEpoch={dataEpoch}
             />
           </ViewSlot>
         )}
@@ -360,6 +388,7 @@ function MainApp() {
               onTasksChange={setTasks}
               categoryFilter={upcomingCategoryFilter}
               onCategoryFilterChange={setUpcomingCategoryFilter}
+              dataEpoch={dataEpoch}
             />
           </ViewSlot>
         )}
@@ -372,6 +401,7 @@ function MainApp() {
               onTasksChange={setTasks}
               categoryFilter={completedCategoryFilter}
               onCategoryFilterChange={setCompletedCategoryFilter}
+              dataEpoch={dataEpoch}
             />
           </ViewSlot>
         )}
@@ -387,6 +417,7 @@ function MainApp() {
               onActivityModeChange={handleGanttActivityModeChange}
               categoryFilter={ganttCategoryFilter}
               onCategoryFilterChange={setGanttCategoryFilter}
+              dataEpoch={dataEpoch}
             />
           </ViewSlot>
         )}
@@ -400,6 +431,7 @@ function MainApp() {
               weekStartsOn={systemSettings.weekStartsOn}
               categoryFilter={calendarCategoryFilter}
               onCategoryFilterChange={setCalendarCategoryFilter}
+              dataEpoch={dataEpoch}
             />
           </ViewSlot>
         )}
@@ -408,6 +440,7 @@ function MainApp() {
             <CheckinView
               tasks={tasks}
               weekStartsOn={systemSettings.weekStartsOn}
+              dataEpoch={dataEpoch}
             />
           </ViewSlot>
         )}
@@ -434,10 +467,16 @@ function MainApp() {
                 prev.map((row) => (row.id === task.id ? task : row)),
               );
             }}
+            dataEpoch={dataEpoch}
             onSessionsChanged={() => {
+              const gen = ++tasksLoadGen.current;
               void listTasks()
-                .then(setTasks)
-                .catch((err) => setLoadError(String(err)));
+                .then((rows) => {
+                  if (tasksLoadGen.current === gen) setTasks(rows);
+                })
+                .catch((err) => {
+                  if (tasksLoadGen.current === gen) setLoadError(String(err));
+                });
             }}
           />
         </div>

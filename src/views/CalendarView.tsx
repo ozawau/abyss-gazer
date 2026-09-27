@@ -54,6 +54,7 @@ interface CalendarViewProps {
   weekStartsOn: WeekStartsOn;
   categoryFilter: string;
   onCategoryFilterChange: (filter: string) => void;
+  dataEpoch: number;
 }
 
 function densityClass(count: number): string {
@@ -71,6 +72,7 @@ export function CalendarView({
   weekStartsOn,
   categoryFilter,
   onCategoryFilterChange,
+  dataEpoch,
 }: CalendarViewProps) {
   const { locale, t } = useI18n();
   useCnHolidayRevision();
@@ -103,7 +105,7 @@ export function CalendarView({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dataEpoch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +120,7 @@ export function CalendarView({
     return () => {
       cancelled = true;
     };
-  }, [mode, cursor, weekStartsOn]);
+  }, [mode, cursor, weekStartsOn, dataEpoch]);
 
   useEffect(() => {
     const root = viewRef.current;

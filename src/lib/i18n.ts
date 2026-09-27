@@ -181,6 +181,11 @@ const zh = {
     backupDir: "备份目录",
     backupUnset: "未选择",
     chooseBackup: "选择本地备份目录",
+    about: "关于",
+    aboutHint: "当前版本与更新记录。",
+    currentVersion: "当前版本 {version}",
+    releaseHistory: "更新记录",
+    committedOn: "提交于 {date}",
   },
   tasks: {
     todayStats: "今日统计",
@@ -528,6 +533,11 @@ const en: Catalog<typeof zh> = {
     backupDir: "Backup folder",
     backupUnset: "Not set",
     chooseBackup: "Choose backup folder",
+    about: "About",
+    aboutHint: "Current version and release history.",
+    currentVersion: "Current version {version}",
+    releaseHistory: "Release history",
+    committedOn: "Committed {date}",
   },
   tasks: {
     todayStats: "Today",

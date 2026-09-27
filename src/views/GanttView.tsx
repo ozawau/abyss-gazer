@@ -52,6 +52,7 @@ interface GanttViewProps {
   onActivityModeChange: (mode: GanttActivityMode) => void;
   categoryFilter: string;
   onCategoryFilterChange: (filter: string) => void;
+  dataEpoch: number;
 }
 
 const SCALE_TABS: { id: GanttScale }[] = [
@@ -70,6 +71,7 @@ export function GanttView({
   onActivityModeChange,
   categoryFilter,
   onCategoryFilterChange,
+  dataEpoch,
 }: GanttViewProps) {
   const { locale, t } = useI18n();
   const narrow = useNarrowViewport();
@@ -107,7 +109,7 @@ export function GanttView({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dataEpoch]);
 
   const categoryMap = useMemo(() => {
     const map = new Map<string, Category>();
@@ -159,7 +161,7 @@ export function GanttView({
     return () => {
       cancelled = true;
     };
-  }, [focusRevision]);
+  }, [focusRevision, dataEpoch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,7 +176,7 @@ export function GanttView({
     return () => {
       cancelled = true;
     };
-  }, [baseRange, focusRevision]);
+  }, [baseRange, focusRevision, dataEpoch]);
 
   const sessionTaskIds = useMemo(
     () => new Set(sessions.map((session) => session.task_id)),

@@ -35,6 +35,7 @@ interface PomodoroViewProps {
   onTimingChange?: (timing: boolean) => void;
   onTick?: (tick: PomodoroTick) => void;
   onTaskChange?: (task: Task) => void;
+  dataEpoch?: number;
 }
 
 type TimerPhase = PomodoroPhase;
@@ -67,6 +68,7 @@ export function PomodoroView({
   onTimingChange,
   onTick,
   onTaskChange,
+  dataEpoch = 0,
 }: PomodoroViewProps) {
   const { locale, t } = useI18n();
   const [phase, setPhase] = useState<TimerPhase>("focus");
@@ -143,7 +145,7 @@ export function PomodoroView({
     return () => {
       cancelled = true;
     };
-  }, [selectedTask?.id]);
+  }, [selectedTask?.id, dataEpoch]);
 
   async function persistSession(completed: boolean, taskId?: string | null) {
     const id = taskId ?? sessionTaskIdRef.current ?? selectedTaskRef.current?.id;

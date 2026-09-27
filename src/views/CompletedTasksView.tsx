@@ -23,6 +23,7 @@ interface CompletedTasksViewProps {
   onTasksChange: (tasks: Task[]) => void;
   categoryFilter: string;
   onCategoryFilterChange: (filter: string) => void;
+  dataEpoch: number;
 }
 
 function startOfDayMs(ymd: string): number | null {
@@ -44,6 +45,7 @@ export function CompletedTasksView({
   onTasksChange,
   categoryFilter,
   onCategoryFilterChange,
+  dataEpoch,
 }: CompletedTasksViewProps) {
   const { locale, t } = useI18n();
   const [categories, setCategories] = useState<Category[]>([]);
@@ -76,7 +78,7 @@ export function CompletedTasksView({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dataEpoch]);
 
   const categoryMap = useMemo(() => {
     const map = new Map<string, Category>();

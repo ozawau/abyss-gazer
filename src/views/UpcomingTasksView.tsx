@@ -23,6 +23,7 @@ interface UpcomingTasksViewProps {
   onTasksChange: (tasks: Task[]) => void;
   categoryFilter: string;
   onCategoryFilterChange: (filter: string) => void;
+  dataEpoch: number;
 }
 
 function startOfDayMs(ymd: string): number | null {
@@ -44,6 +45,7 @@ export function UpcomingTasksView({
   onTasksChange,
   categoryFilter,
   onCategoryFilterChange,
+  dataEpoch,
 }: UpcomingTasksViewProps) {
   const { locale, t } = useI18n();
   const [categories, setCategories] = useState<Category[]>([]);
@@ -82,7 +84,7 @@ export function UpcomingTasksView({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dataEpoch]);
 
   const categoryMap = useMemo(() => {
     const map = new Map<string, Category>();

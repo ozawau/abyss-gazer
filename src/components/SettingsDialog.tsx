@@ -25,10 +25,11 @@ import {
   isSilentSound,
   playPomodoroEndChime,
 } from "../lib/pomodoroChime";
+import { APP_VERSION, RELEASE_NOTES } from "../lib/changelog";
 import { publishSystemSettings, useI18n } from "./LocaleProvider";
 import { ToggleSwitch } from "./ToggleSwitch";
 
-type SettingsSection = "pomodoro" | "calendar" | "system";
+type SettingsSection = "pomodoro" | "calendar" | "system" | "about";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -335,6 +336,15 @@ export function SettingsDialog({
               onClick={() => setSection("system")}
             >
               {t("settings.system")}
+            </button>
+            <button
+              type="button"
+              className={`settings-nav-item${
+                section === "about" ? " is-active" : ""
+              }`}
+              onClick={() => setSection("about")}
+            >
+              {t("settings.about")}
             </button>
           </nav>
 
@@ -780,6 +790,46 @@ export function SettingsDialog({
                     </label>
                   )}
                 </div>
+              </div>
+            )}
+
+            {section === "about" && (
+              <div className="settings-panel">
+                <header className="settings-panel-header">
+                  <h3>{t("settings.about")}</h3>
+                  <p>{t("settings.aboutHint")}</p>
+                  <p className="about-current">
+                    {t("settings.currentVersion", { version: `v${APP_VERSION}` })}
+                  </p>
+                </header>
+                <h4 className="about-history-title">{t("settings.releaseHistory")}</h4>
+                <ol className="about-releases">
+                  {RELEASE_NOTES.map((note) => (
+                    <li
+                      key={note.version}
+                      className={
+                        note.version === `v${APP_VERSION}` ? "is-current" : undefined
+                      }
+                    >
+                      <h5>
+                        <span>{note.version}</span>
+                        {note.date && (
+                          <span className="about-release-date">
+                            {t("settings.committedOn", { date: note.date })}
+                          </span>
+                        )}
+                      </h5>
+                      {note.summary && <p>{note.summary}</p>}
+                      {note.items.length > 0 && (
+                        <ul>
+                          {note.items.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+                </ol>
               </div>
             )}
 

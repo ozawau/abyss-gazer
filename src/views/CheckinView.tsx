@@ -33,6 +33,7 @@ import { descendantIds } from "../lib/taskTree";
 interface CheckinViewProps {
   tasks: Task[];
   weekStartsOn: WeekStartsOn;
+  dataEpoch: number;
 }
 
 type CheckinMode = "month" | "week";
@@ -174,7 +175,7 @@ function isHabitRoot(task: Task, categories: Map<string, Category>): boolean {
   return name.trim().toLowerCase() === "habit";
 }
 
-export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
+export function CheckinView({ tasks, weekStartsOn, dataEpoch }: CheckinViewProps) {
   const { locale, t } = useI18n();
   useCnHolidayRevision();
   const today = useMemo(() => startOfLocalDay(new Date()), []);
@@ -233,7 +234,7 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dataEpoch]);
 
   useEffect(() => {
     const start = visibleDays[0];
@@ -263,7 +264,7 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
     return () => {
       cancelled = true;
     };
-  }, [visibleDays]);
+  }, [visibleDays, dataEpoch]);
 
   useEffect(() => {
     const start = visibleDays[0];
@@ -282,7 +283,7 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
     return () => {
       cancelled = true;
     };
-  }, [visibleDays]);
+  }, [visibleDays, dataEpoch]);
 
   useEffect(() => {
     if (habits.length === 0) return;
@@ -305,7 +306,7 @@ export function CheckinView({ tasks, weekStartsOn }: CheckinViewProps) {
     return () => {
       cancelled = true;
     };
-  }, [habits.length, historyStart, today]);
+  }, [habits.length, historyStart, today, dataEpoch]);
 
   const autoChecked = useMemo(() => {
     const habitOfChild = new Map<string, string>();

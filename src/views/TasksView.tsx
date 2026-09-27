@@ -85,6 +85,7 @@ interface TasksViewProps {
   onStartPomodoro: (taskId: string) => void;
   categoryFilter: CategoryFilter;
   onCategoryFilterChange: (filter: CategoryFilter) => void;
+  dataEpoch: number;
 }
 
 const PRIORITY_GROUPS: { id: TaskPriority; label: string }[] = [
@@ -282,6 +283,7 @@ export function TasksView({
   onStartPomodoro,
   categoryFilter,
   onCategoryFilterChange,
+  dataEpoch,
 }: TasksViewProps) {
   const { locale, t } = useI18n();
   const [draft, setDraft] = useState("");
@@ -341,7 +343,7 @@ export function TasksView({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dataEpoch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -369,6 +371,25 @@ export function TasksView({
     for (const c of categories) map.set(c.id, c);
     return map;
   }, [categories]);
+
+  const currentTasks = useMemo(
+    () =>
+      withAncestors(
+        tasks.filter(
+          (task) => task.status !== "done" && isTaskStarted(task, nowMs),
+        ),
+        tasks,
+      ),
+    [tasks, nowMs],
+  );
+
+  const showUncategorizedFilter = currentTasks.some((task) => !task.category_id);
+
+  useEffect(() => {
+    if (!showUncategorizedFilter && categoryFilter === "none") {
+      onCategoryFilterChange("all");
+    }
+  }, [showUncategorizedFilter, categoryFilter, onCategoryFilterChange]);
 
   const filteredTasks = useMemo(() => {
     const byCategory =
@@ -999,13 +1020,13 @@ export function TasksView({
                   <div className="task-main">
                     <span className="task-title-btn">{task.title}</span>
                     {category && (
-                      <span className="task-category-tag">
+                      <span className="task-category-tag" title={category.name}>
                         <span
                           className="category-swatch"
                           style={{ background: category.color }}
                           aria-hidden
                         />
-                        {category.name}
+                        <span className="task-category-name">{category.name}</span>
                       </span>
                     )}
                     <TaskPomodoroClocks
@@ -1120,13 +1141,15 @@ export function TasksView({
         >
           {t("common.all")}
         </button>
-        <button
-          type="button"
-          className={`filter-chip${categoryFilter === "none" ? " is-active" : ""}`}
-          onClick={() => onCategoryFilterChange("none")}
-        >
-          {t("common.uncategorized")}
-        </button>
+        {showUncategorizedFilter && (
+          <button
+            type="button"
+            className={`filter-chip${categoryFilter === "none" ? " is-active" : ""}`}
+            onClick={() => onCategoryFilterChange("none")}
+          >
+            {t("common.uncategorized")}
+          </button>
+        )}
         {categories.map((c) => (
           <button
             key={c.id}
