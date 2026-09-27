@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   countFocusSessionsSince,
   countFocusSessionsTotalSince,
@@ -10,6 +11,7 @@ import {
   Task,
   updateTask,
 } from "../lib/api";
+import { FullscreenIcon } from "../components/FullscreenIcon";
 import { useI18n } from "../components/LocaleProvider";
 import { playPomodoroEndChime } from "../lib/pomodoroChime";
 import { formatTaskLineage, taskById } from "../lib/taskTree";
@@ -57,6 +59,10 @@ function isBreakPhase(phase: TimerPhase): boolean {
   return phase === "break" || phase === "long_break";
 }
 
+function secondsUntil(endsAt: number, now = Date.now()): number {
+  return Math.max(0, Math.ceil((endsAt - now) / 1000));
+}
+
 export function PomodoroView({
   tasks,
   selectedTask,
@@ -84,6 +90,7 @@ export function PomodoroView({
   const statusRef = useRef(status);
   const remainingRef = useRef(remaining);
   const startedAtRef = useRef<number | null>(null);
+  const endsAtRef = useRef<number | null>(null);
   const plannedRef = useRef(plannedFor("focus", DEFAULT_POMODORO_SETTINGS));
   const finishingRef = useRef(false);
   const selectedTaskRef = useRef(selectedTask);
@@ -333,18 +340,52 @@ export function PomodoroView({
   useEffect(() => {
     if (status !== "running") return;
 
-    const id = window.setInterval(() => {
-      if (finishingRef.current) return;
-      const next = remainingRef.current - 1;
-      if (next <= 0) {
-        setRemaining(0);
-        void finishSegment(true);
-        return;
-      }
-      setRemaining(next);
-    }, 1000);
+    endsAtRef.current = Date.now() + remainingRef.current * 1000;
 
-    return () => window.clearInterval(id);
+    const sync = () => {
+      if (finishingRef.current || statusRef.current !== "running") return;
+      const endsAt = endsAtRef.current;
+      if (endsAt == null) return;
+      const next = secondsUntil(endsAt);
+      if (next !== remainingRef.current) {
+        remainingRef.current = next;
+        setRemaining(next);
+      }
+      if (next <= 0) void finishSegment(true);
+    };
+
+    sync();
+    const id = window.setInterval(sync, 1000);
+    const onWake = () => sync();
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) sync();
+      })
+      .then((stop) => {
+        if (cancelled) stop();
+        else unlisten = stop;
+      })
+      .catch(() => {
+        /* Browser preview has no Tauri window. */
+      });
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+      unlisten?.();
+      if (endsAtRef.current != null && statusRef.current === "paused") {
+        const next = secondsUntil(endsAtRef.current);
+        remainingRef.current = next;
+        setRemaining(next);
+      }
+      endsAtRef.current = null;
+    };
   }, [status]);
 
   function start() {
@@ -375,6 +416,11 @@ export function PomodoroView({
   }
 
   function pause() {
+    if (statusRef.current === "running" && endsAtRef.current != null) {
+      const next = secondsUntil(endsAtRef.current);
+      remainingRef.current = next;
+      setRemaining(next);
+    }
     setStatus("paused");
   }
 
@@ -529,8 +575,9 @@ export function PomodoroView({
             className="secondary-btn pomodoro-fullscreen-btn"
             onClick={onToggleFullscreen}
             title={fullscreen ? t("pomodoro.exitFullscreen") : t("pomodoro.enterFullscreen")}
+            aria-label={fullscreen ? t("pomodoro.exitFullscreen") : t("pomodoro.enterFullscreen")}
           >
-            {fullscreen ? t("pomodoro.exitFullscreen") : t("pomodoro.fullscreen")}
+            <FullscreenIcon exit={fullscreen} />
           </button>
         )}
       </header>

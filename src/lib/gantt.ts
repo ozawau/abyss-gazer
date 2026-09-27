@@ -146,7 +146,8 @@ export function buildGanttRange(
   locale: AppLocale = "zh",
 ): GanttRange {
   if (scale === "week") {
-    const start = startOfWeek(cursor, weekStartsOn);
+    const anchor = startOfLocalDay(cursor);
+    const start = addDays(anchor, -7);
     const columns: GanttColumn[] = Array.from({ length: 14 }, (_, i) => {
       const day = addDays(start, i);
       const dow = day.getDay();
@@ -160,7 +161,7 @@ export function buildGanttRange(
     });
     return {
       start,
-      end: addDays(start, 13),
+      end: addDays(anchor, 6),
       unitDays: 1,
       columnWidth: GANTT_DAY_COL_PX,
       columns,

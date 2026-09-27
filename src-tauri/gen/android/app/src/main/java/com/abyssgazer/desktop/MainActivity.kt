@@ -2,12 +2,15 @@ package com.abyssgazer.desktop
 
 import android.os.Bundle
 import android.view.View
+import android.webkit.WebView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
+  private var backCallback: OnBackPressedCallback? = null
   private val directoryPicker =
     registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
       DirectoryPicker.onPickerResult(this, result)
@@ -22,6 +25,32 @@ class MainActivity : TauriActivity() {
     registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
       DirectoryPicker.onWritePermissionResult(granted)
     }
+
+  override fun onWebViewCreate(webView: WebView) {
+    backCallback?.remove()
+    val callback = object : OnBackPressedCallback(true) {
+      override fun handleOnBackPressed() {
+        webView.evaluateJavascript(
+          """
+          (function(){
+            try {
+              if (typeof window.__abyssHandleBack === 'function') {
+                return window.__abyssHandleBack();
+              }
+            } catch (e) {}
+            return 'exit';
+          })()
+          """.trimIndent()
+        ) { raw ->
+          if (raw?.trim()?.removeSurrounding("\"") == "exit") {
+            runOnUiThread { finish() }
+          }
+        }
+      }
+    }
+    backCallback = callback
+    onBackPressedDispatcher.addCallback(this, callback)
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()

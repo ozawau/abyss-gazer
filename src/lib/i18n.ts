@@ -67,6 +67,7 @@ const zh = {
     next: "下一段",
     to: "至",
     settings: "设置",
+    pressAgainToExit: "再按一次退出",
     add: "添加",
     startPomodoro: "开始番茄钟",
     hideDone: "隐藏已完成",
@@ -336,6 +337,8 @@ const zh = {
   gantt: {
     title: "甘特图",
     hint: "查看排期，以及时间范围内的专注与完成记录。",
+    fullscreen: "全屏",
+    exitFullscreen: "退出全屏",
     scale: "时间粒度",
     fortnight: "双周",
     month: "月",
@@ -419,6 +422,7 @@ const en: Catalog<typeof zh> = {
     next: "Next",
     to: "to",
     settings: "Settings",
+    pressAgainToExit: "Press again to exit",
     add: "Add",
     startPomodoro: "Start pomodoro",
     hideDone: "Hide completed",
@@ -688,6 +692,8 @@ const en: Catalog<typeof zh> = {
   gantt: {
     title: "Gantt",
     hint: "Schedule, plus focus and completion in this range.",
+    fullscreen: "Fullscreen",
+    exitFullscreen: "Exit fullscreen",
     scale: "Scale",
     fortnight: "2 weeks",
     month: "Month",

@@ -21,7 +21,8 @@ import { type GanttActivityMode } from "./lib/gantt";
 import { syncPomodoroPresence } from "./lib/pomodoroPresence";
 import { type PomodoroTick } from "./lib/pomodoroTimer";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
-import { useNarrowViewport } from "./lib/viewport";
+import { ANDROID_BACK_EVENT } from "./lib/androidBack";
+import { isAndroidDevice, useNarrowViewport } from "./lib/viewport";
 import { formatTaskLineage, taskById } from "./lib/taskTree";
 import type { TasksSubPage } from "./lib/tasksNav";
 import { CompletedTasksView } from "./views/CompletedTasksView";
@@ -92,6 +93,10 @@ function MainApp() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pomodoroPlayToken, setPomodoroPlayToken] = useState(0);
   const [pomodoroFullscreen, setPomodoroFullscreen] = useState(false);
+  const pomodoroFullscreenRef = useRef(pomodoroFullscreen);
+  pomodoroFullscreenRef.current = pomodoroFullscreen;
+  const activeViewRef = useRef(activeView);
+  activeViewRef.current = activeView;
   const [tasksCategoryFilter, setTasksCategoryFilter] =
     useState<CategoryFilter>("all");
   const [upcomingCategoryFilter, setUpcomingCategoryFilter] =
@@ -333,6 +338,46 @@ function MainApp() {
       return next;
     });
   }
+
+  useEffect(() => {
+    if (!isAndroidDevice()) return;
+    let lastBackAt = 0;
+    let toastTimer = 0;
+    const toast = document.createElement("div");
+    toast.className = "android-exit-toast";
+    toast.setAttribute("role", "status");
+    document.body.appendChild(toast);
+
+    function onBack(event: Event) {
+      if (activeViewRef.current !== "pomodoro" || !pomodoroFullscreenRef.current) {
+        return;
+      }
+      event.preventDefault();
+      setPomodoroFullscreen(false);
+    }
+
+    window.__abyssHandleBack = () => {
+      const backEvent = new CustomEvent(ANDROID_BACK_EVENT, { cancelable: true });
+      if (!window.dispatchEvent(backEvent)) return "handled";
+      const now = Date.now();
+      if (now - lastBackAt < 2000) return "exit";
+      lastBackAt = now;
+      toast.textContent = t("common.pressAgainToExit");
+      toast.classList.add("is-visible");
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => {
+        toast.classList.remove("is-visible");
+      }, 2000);
+      return "handled";
+    };
+    window.addEventListener(ANDROID_BACK_EVENT, onBack);
+    return () => {
+      window.removeEventListener(ANDROID_BACK_EVENT, onBack);
+      delete window.__abyssHandleBack;
+      window.clearTimeout(toastTimer);
+      toast.remove();
+    };
+  }, [t]);
 
   const immersivePomodoro =
     activeView === "pomodoro" && pomodoroFullscreen;

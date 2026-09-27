@@ -11,13 +11,15 @@ import {
   addDays,
   addMonths,
   startOfLocalDay,
-  startOfWeek,
   type WeekStartsOn,
 } from "../lib/calendar";
 import { formatShortDate } from "../lib/dateDisplay";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
+import { FullscreenIcon } from "../components/FullscreenIcon";
 import { useI18n } from "../components/LocaleProvider";
 import type { AppLocale } from "../lib/i18n";
+import { ANDROID_BACK_EVENT } from "../lib/androidBack";
+import { isAndroidDevice, useNarrowViewport } from "../lib/viewport";
 import {
   buildGanttDayRange,
   buildGanttRange,
@@ -40,7 +42,6 @@ import {
   type GanttRange,
   type GanttScale,
 } from "../lib/gantt";
-import { useNarrowViewport } from "../lib/viewport";
 
 interface GanttViewProps {
   tasks: Task[];
@@ -74,9 +75,11 @@ export function GanttView({
   dataEpoch,
 }: GanttViewProps) {
   const { locale, t } = useI18n();
+  const android = isAndroidDevice();
   const narrow = useNarrowViewport();
+  const desktopNarrow = narrow && !android;
   const today = useMemo(() => startOfLocalDay(new Date()), []);
-  const [scale, setScale] = useState<GanttScale | null>("month");
+  const [scale, setScale] = useState<GanttScale | null>("week");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
   const [customRange, setCustomRange] = useState<{ start: Date; end: Date } | null>(
     null,
@@ -88,15 +91,30 @@ export function GanttView({
     Map<string, number>
   >(new Map());
   const [error, setError] = useState<string | null>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [boardBox, setBoardBox] = useState({ width: 0, height: 0 });
+  const [timelineWidth, setTimelineWidth] = useState(0);
+  const [boardFullscreen, setBoardFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!android) return;
+    function onBack(event: Event) {
+      if (!boardFullscreen) return;
+      const slot = viewportRef.current?.closest(".view-slot");
+      if (slot?.classList.contains("is-hidden")) return;
+      event.preventDefault();
+      setBoardFullscreen(false);
+    }
+    window.addEventListener(ANDROID_BACK_EVENT, onBack);
+    return () => window.removeEventListener(ANDROID_BACK_EVENT, onBack);
+  }, [android, boardFullscreen]);
   const [hover, setHover] = useState<{
     task: Task;
     parent: Task;
     x: number;
     y: number;
   } | null>(null);
-  const boardRef = useRef<HTMLDivElement>(null);
-  const [timelineWidth, setTimelineWidth] = useState(0);
-
   useEffect(() => {
     let cancelled = false;
     listCategories()
@@ -118,27 +136,56 @@ export function GanttView({
   }, [categories]);
 
   useEffect(() => {
-    if (!narrow) return;
+    if (!desktopNarrow) return;
     setScale("week");
     setCustomRange(null);
-  }, [narrow]);
+  }, [desktopNarrow]);
+
+  useLayoutEffect(() => {
+    if (android) {
+      const viewport = viewportRef.current;
+      if (!viewport) return;
+      const measure = () => {
+        const next = {
+          width: viewport.clientWidth,
+          height: viewport.clientHeight,
+        };
+        setBoardBox((prev) =>
+          prev.width === next.width && prev.height === next.height ? prev : next,
+        );
+      };
+      measure();
+      const observer = new ResizeObserver(measure);
+      observer.observe(viewport);
+      return () => observer.disconnect();
+    }
+
+    const board = boardRef.current;
+    if (!board) return;
+    const measure = () => {
+      const head = board.querySelector(".gantt-head");
+      const width = head instanceof HTMLElement ? head.clientWidth : 0;
+      if (width <= 0) return;
+      setTimelineWidth((prev) => (prev === width ? prev : width));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(board);
+    return () => observer.disconnect();
+  }, [android, desktopNarrow]);
 
   const baseRange = useMemo(() => {
-    if (narrow) {
-      const start = startOfWeek(cursor, weekStartsOn);
-      return buildGanttDayRange(start, addDays(start, 6), locale);
-    }
     if (scale == null && customRange) {
       return buildGanttDayRange(customRange.start, customRange.end, locale);
     }
-    return buildGanttRange(scale ?? "month", cursor, weekStartsOn, locale);
-  }, [narrow, scale, cursor, weekStartsOn, customRange, locale]);
+    return buildGanttRange(scale ?? "week", cursor, weekStartsOn, locale);
+  }, [scale, cursor, weekStartsOn, customRange, locale]);
 
   const range = useMemo(() => {
     const count = Math.max(baseRange.columns.length, 1);
-    if (timelineWidth <= 0) return baseRange;
+    if (android || timelineWidth <= 0) return baseRange;
     return { ...baseRange, columnWidth: timelineWidth / count };
-  }, [baseRange, timelineWidth]);
+  }, [android, baseRange, timelineWidth]);
 
   const focusRevision = useMemo(
     () => tasks.reduce((sum, task) => sum + (task.completed_pomodoros ?? 0), 0),
@@ -252,21 +299,6 @@ export function GanttView({
       : formatGanttTitle(scale, range, cursor, locale);
   const emptyMessage = t("gantt.empty");
 
-  useLayoutEffect(() => {
-    const board = boardRef.current;
-    if (!board) return;
-    const measure = () => {
-      const head = board.querySelector(".gantt-head");
-      const width = head instanceof HTMLElement ? head.clientWidth : 0;
-      if (width <= 0) return;
-      setTimelineWidth((prev) => (prev === width ? prev : width));
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(board);
-    return () => observer.disconnect();
-  }, [baseRange.columns.length]);
-
   function applyCustom(start: Date, end: Date) {
     const from = startOfLocalDay(start);
     const to = startOfLocalDay(end);
@@ -287,10 +319,6 @@ export function GanttView({
   }
 
   function goPrev() {
-    if (narrow) {
-      setCursor((d) => addDays(d, -7));
-      return;
-    }
     if (scale == null) {
       const span = daysBetween(range.start, range.end) + 1;
       applyCustom(addDays(range.start, -span), addDays(range.end, -span));
@@ -302,10 +330,6 @@ export function GanttView({
   }
 
   function goNext() {
-    if (narrow) {
-      setCursor((d) => addDays(d, 7));
-      return;
-    }
     if (scale == null) {
       const span = daysBetween(range.start, range.end) + 1;
       applyCustom(addDays(range.start, span), addDays(range.end, span));
@@ -333,7 +357,7 @@ export function GanttView({
         </div>
         <div className="calendar-toolbar">
           <div
-            className={`calendar-mode-tabs${narrow ? " is-hidden-narrow" : ""}`}
+            className={`calendar-mode-tabs${desktopNarrow ? " is-hidden-narrow" : ""}`}
             role="tablist"
             aria-label={t("gantt.scale")}
           >
@@ -370,6 +394,17 @@ export function GanttView({
               {t("common.next")}
             </button>
           </div>
+          {android && (
+            <button
+              type="button"
+              className="secondary-btn gantt-fullscreen-btn"
+              onClick={() => setBoardFullscreen(true)}
+              title={t("gantt.fullscreen")}
+              aria-label={t("gantt.fullscreen")}
+            >
+              <FullscreenIcon />
+            </button>
+          )}
         </div>
       </header>
 
@@ -446,7 +481,7 @@ export function GanttView({
         <p className="gantt-empty">{emptyMessage}</p>
       )}
 
-      {narrow && visibleRows.length > 0 && (
+      {desktopNarrow && visibleRows.length > 0 && (
         <ul className="gantt-week-list">
           {visibleRows.map((row) => (
             <GanttWeekGroup
@@ -459,7 +494,25 @@ export function GanttView({
         </ul>
       )}
 
-      <div className={`gantt-board${narrow ? " is-hidden-narrow" : ""}`} ref={boardRef}>
+      <div
+        className={`gantt-board-viewport${
+          android && boardFullscreen ? " is-fullscreen" : ""
+        }`}
+        ref={viewportRef}
+      >
+      <div
+        className={`gantt-board${desktopNarrow ? " is-hidden-narrow" : ""}`}
+        ref={boardRef}
+        style={
+          android
+            ? {
+                width: boardBox.height,
+                height: boardBox.width,
+                ["--gantt-col" as string]: `${range.columnWidth}px`,
+              }
+            : undefined
+        }
+      >
         <div className="gantt-scroll">
           <div className="gantt-grid">
             <div className="gantt-header-row">
@@ -512,6 +565,18 @@ export function GanttView({
           </div>
         </div>
       </div>
+      {android && boardFullscreen && (
+        <button
+          type="button"
+          className="secondary-btn gantt-fullscreen-exit"
+          onClick={() => setBoardFullscreen(false)}
+          title={t("gantt.exitFullscreen")}
+          aria-label={t("gantt.exitFullscreen")}
+        >
+          <FullscreenIcon exit />
+        </button>
+      )}
+      </div>
 
       {hover && (
         <GanttTaskHover
@@ -519,6 +584,7 @@ export function GanttView({
           parent={hover.parent}
           x={hover.x}
           y={hover.y}
+          rotated={android}
           category={
             hover.task.category_id
               ? categoryMap.get(hover.task.category_id) ?? null
@@ -766,6 +832,10 @@ function GanttParentRowView({
                         ? t("gantt.finished")
                         : t("gantt.focused")
                   }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectTask(lane.task.id);
+                  }}
                   onMouseEnter={(e) => {
                     onHover({
                       task: lane.task,
@@ -841,26 +911,41 @@ function GanttTaskHover({
   parent,
   x,
   y,
+  rotated,
   category,
 }: {
   task: Task;
   parent: Task;
   x: number;
   y: number;
+  rotated: boolean;
   category: Category | null;
 }) {
   const { locale, t } = useI18n();
-  const left = Math.min(x + 14, window.innerWidth - 280);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 240, height: 120 });
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    setSize((prev) =>
+      prev.width === width && prev.height === height ? prev : { width, height },
+    );
+  });
+  const { left, top } = rotated
+    ? rotatedHoverPosition(x, y, size.width, size.height)
+    : uprightHoverPosition(x, y);
   const priority =
     task.priority === "high"
       ? t("common.priorityHighShort")
       : task.priority === "medium"
         ? t("common.priorityMediumShort")
         : t("common.priorityLowShort");
-  const top = Math.min(y + 16, window.innerHeight - 180);
   return (
     <div
-      className="gantt-hover-card"
+      ref={cardRef}
+      className={`gantt-hover-card${rotated ? " is-rotated" : ""}`}
       style={{ left, top }}
       role="tooltip"
     >
@@ -890,6 +975,34 @@ function GanttTaskHover({
       </p>
     </div>
   );
+}
+
+/** Clockwise 90° around the top-left corner swings the card left and down. */
+function rotatedHoverPosition(
+  x: number,
+  y: number,
+  layoutWidth: number,
+  layoutHeight: number,
+): { left: number; top: number } {
+  const margin = 8;
+  const visualWidth = layoutHeight;
+  const visualHeight = layoutWidth;
+  const visualLeft = Math.min(
+    Math.max(margin, x + 12),
+    Math.max(margin, window.innerWidth - visualWidth - margin),
+  );
+  const visualTop = Math.min(
+    Math.max(margin, y + 12),
+    Math.max(margin, window.innerHeight - visualHeight - margin),
+  );
+  return { left: visualLeft + layoutHeight, top: visualTop };
+}
+
+function uprightHoverPosition(x: number, y: number): { left: number; top: number } {
+  return {
+    left: Math.min(x + 14, window.innerWidth - 280),
+    top: Math.min(y + 16, window.innerHeight - 180),
+  };
 }
 
 function GanttTrackBg({
