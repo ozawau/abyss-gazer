@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="checkin_widget_label">今日打卡 · Abyss Gazer</string>
+    <string name="checkin_widget_description">查看今天的打卡，点一条就能完成或取消</string>
+    <string name="checkin_widget_title">今日打卡</string>
+    <string name="checkin_widget_preview_date">9月28日 周一</string>
+    <string name="checkin_widget_preview_summary">待打卡 5 · 已打卡 2 · 未打卡 3</string>
+    <string name="checkin_widget_preview_nudge">还差 3 个，连续全勤 4 天</string>
+    <string name="checkin_widget_preview_open">未打卡</string>
+    <string name="checkin_widget_preview_open_task">○  阅读</string>
+    <string name="checkin_widget_preview_done">已打卡</string>
+    <string name="checkin_widget_preview_done_task">✓  早起</string>
+    <string name="note_task_widget_label">便签任务（4×1）</string>
+    <string name="note_task_widget_description">输入任务名称，添加到设置里指定的便签分类（高优先级）</string>
+    <string name="note_task_widget_hint">任务名称…</string>
+    <string name="note_task_widget_preview_hint">输入便签任务…</string>
+    <string name="note_task_widget_add">添加</string>
+    <string name="note_task_widget_dialog_title">新建便签任务</string>
+</resources>

@@ -12,6 +12,7 @@ pub struct DbState {
 
 pub fn open_db(path: &Path) -> SqliteResult<Connection> {
     let conn = Connection::open(path)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute_batch(
         "
         PRAGMA foreign_keys = ON;
@@ -65,6 +66,13 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
         ",
     )?;
     migrate_schema(&conn)?;
+    #[cfg(target_os = "android")]
+    {
+        fn on_db_change(_: rusqlite::hooks::Action, _: &str, _: &str, _: i64) {
+            crate::widget::request_publish();
+        }
+        conn.update_hook(Some(on_db_change));
+    }
     Ok(conn)
 }
 
@@ -310,6 +318,28 @@ pub fn init_db(app: &AppHandle) -> Result<(Connection, PathBuf), String> {
 pub fn get_db_path(db: tauri::State<'_, DbState>) -> Result<String, String> {
     let path = db.db_path.lock().map_err(|e| e.to_string())?;
     Ok(path.display().to_string())
+}
+
+/// Drop the open connection and open the database file again.
+/// An external replace keeps the old inode alive on the existing connection,
+/// so reads stay stale and later writes never reach the new file.
+#[tauri::command]
+pub fn reopen_database(app: AppHandle, db: tauri::State<'_, DbState>) -> Result<(), String> {
+    let dir = resolve_active_data_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create data dir: {e}"))?;
+    let db_path = db_file_in(&dir);
+    {
+        let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        let fresh = open_db(&db_path).map_err(|e| format!("open database: {e}"))?;
+        *conn = fresh;
+    }
+    {
+        let mut path = db.db_path.lock().map_err(|e| e.to_string())?;
+        *path = db_path;
+    }
+    crate::widget::request_publish();
+    Ok(())
 }
 
 #[cfg(test)]

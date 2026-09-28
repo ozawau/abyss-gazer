@@ -1,7 +1,8 @@
 use crate::db::{open_db, DbState};
 use crate::system_config::{
-    db_file_in, normalize_system_settings, read_system_settings, resolve_active_data_dir,
-    resolve_config_dir, write_system_settings, SyncMethod, SystemSettings,
+    db_file_in, ensure_category_id, migrate_legacy_task_category_ids, normalize_system_settings,
+    read_system_settings, resolve_active_data_dir, resolve_config_dir, write_system_settings,
+    SyncMethod, SystemSettings,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -325,6 +326,7 @@ fn write_windows_run_value() -> Result<(), String> {
 #[tauri::command]
 pub fn get_system_settings(app: AppHandle) -> Result<SystemSettings, String> {
     let mut settings = read_system_settings(&app)?;
+    migrate_legacy_task_category_ids(&app, &mut settings)?;
     if let Ok(enabled) = os_launch_at_login_enabled(&app) {
         if settings.launch_at_login != enabled {
             settings.launch_at_login = enabled;
@@ -350,6 +352,15 @@ pub async fn set_system_settings(
     settings: SystemSettings,
 ) -> Result<SystemSettings, String> {
     let normalized = normalize_system_settings(settings);
+    if let Some(state) = app.try_state::<crate::db::DbState>() {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        if let Some(ref id) = normalized.checkin_category_id {
+            ensure_category_id(&conn, id)?;
+        }
+        if let Some(ref id) = normalized.note_category_id {
+            ensure_category_id(&conn, id)?;
+        }
+    }
     let previous = read_system_settings(&app)?;
     if previous.launch_at_login != normalized.launch_at_login {
         let enabled = normalized.launch_at_login;
@@ -361,6 +372,7 @@ pub async fn set_system_settings(
         .map_err(|e| format!("开机启动失败: {e}"))??;
     }
     write_system_settings(&app, &normalized)?;
+    crate::widget::request_publish();
     Ok(normalized)
 }
 
@@ -399,6 +411,7 @@ pub fn set_data_directory(
     settings.data_dir = Some(trimmed);
     let normalized = normalize_system_settings(settings);
     write_system_settings(&app, &normalized)?;
+    crate::widget::request_publish();
     Ok(normalized)
 }
 
@@ -468,6 +481,7 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
         let _ = disable_sync(&app);
         return Err(err);
     }
+    crate::widget::request_publish();
     Ok(())
 }
 

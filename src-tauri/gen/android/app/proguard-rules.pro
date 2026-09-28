@@ -22,3 +22,15 @@
 
 # Called from Rust by class and field name.
 -keep class com.abyssgazer.desktop.DirectoryPicker { *; }
+-keepclassmembers class com.abyssgazer.desktop.CheckinWidgetProvider {
+    public static void refresh(android.content.Context);
+    public static boolean requestPin(android.app.Activity);
+}
+-keep class com.abyssgazer.desktop.CheckinWidgetProvider { *; }
+-keep class com.abyssgazer.desktop.CheckinWidgetService { *; }
+-keepclassmembers class com.abyssgazer.desktop.NoteTaskWidgetProvider {
+    public static void refresh(android.content.Context);
+    public static boolean requestPin(android.app.Activity);
+}
+-keep class com.abyssgazer.desktop.NoteTaskWidgetProvider { *; }
+-keep class com.abyssgazer.desktop.NoteTaskInputActivity { *; }

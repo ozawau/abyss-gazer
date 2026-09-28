@@ -2192,6 +2192,12 @@ html.is-narrow.is-android .settings-nav-icon {
   font-size: 0.82rem;
 }
 
+.settings-field-hint {
+  margin: -0.35rem 0 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
 .about-current {
   margin: 0.55rem 0 0;
   color: var(--text);

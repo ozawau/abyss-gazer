@@ -11,6 +11,7 @@ import {
   getSystemSettings,
   listTasks,
   PomodoroSettings,
+  reopenDatabase,
   runDataSync,
   setSystemSettings as persistSystemSettings,
   SystemSettings,
@@ -75,6 +76,23 @@ function MainApp() {
     }
   }, []);
   const [activeView, setActiveView] = useState<ViewId>("checkin");
+  useEffect(() => {
+    const openCheckin = () => setActiveView("checkin");
+    const win = window as Window & {
+      __abyssCheckinReady?: boolean;
+      __abyssPendingCheckin?: boolean;
+    };
+    window.addEventListener("abyss-open-checkin", openCheckin);
+    if (win.__abyssPendingCheckin) {
+      win.__abyssPendingCheckin = false;
+      openCheckin();
+    }
+    win.__abyssCheckinReady = true;
+    return () => {
+      win.__abyssCheckinReady = false;
+      window.removeEventListener("abyss-open-checkin", openCheckin);
+    };
+  }, []);
   const [tasksSubPage, setTasksSubPage] = useState<TasksSubPage>("active");
   const [mountedViews, setMountedViews] = useState<ReadonlySet<ViewId>>(
     () => new Set<ViewId>(["checkin"]),
@@ -120,6 +138,11 @@ function MainApp() {
   const [syncError, setSyncError] = useState<string | null>(null);
   useDismissOnAndroidBack(syncError != null, () => setSyncError(null), syncErrorRef);
   const [dataEpoch, setDataEpoch] = useState(0);
+  useEffect(() => {
+    const refresh = () => setDataEpoch((n) => n + 1);
+    window.addEventListener("abyss-checkin-changed", refresh);
+    return () => window.removeEventListener("abyss-checkin-changed", refresh);
+  }, []);
   const tasksLoadGen = useRef(0);
 
   useEffect(() => {
@@ -149,8 +172,9 @@ function MainApp() {
       .then((settings) => {
         if (!cancelled) {
           systemReady.current = true;
-          setSystemSettings(settings);
-          publishSystemSettings(settings);
+          const merged = { ...DEFAULT_SYSTEM_SETTINGS, ...settings };
+          setSystemSettings(merged);
+          publishSystemSettings(merged);
           setSidebarOpen(!settings.sidebarCollapsed);
         }
       })
@@ -159,6 +183,36 @@ function MainApp() {
       });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAndroidDevice()) return;
+    let cancelled = false;
+    const onForeground = () => {
+      const gen = ++tasksLoadGen.current;
+      void (async () => {
+        try {
+          await reopenDatabase();
+          if (cancelled || tasksLoadGen.current !== gen) return;
+          const [rows, pomodoro] = await Promise.all([
+            listTasks(),
+            getPomodoroSettings(),
+          ]);
+          if (cancelled || tasksLoadGen.current !== gen) return;
+          setTasks(rows);
+          setPomodoroSettings({ ...DEFAULT_POMODORO_SETTINGS, ...pomodoro });
+          setDataEpoch((n) => n + 1);
+          setLoadError(null);
+        } catch (err) {
+          if (!cancelled && tasksLoadGen.current === gen) setLoadError(String(err));
+        }
+      })();
+    };
+    window.addEventListener("abyss-foreground", onForeground);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("abyss-foreground", onForeground);
     };
   }, []);
 
@@ -487,6 +541,7 @@ function MainApp() {
           <ViewSlot active={activeView === "checkin"}>
             <CheckinView
               tasks={tasks}
+              systemSettings={systemSettings}
               weekStartsOn={systemSettings.weekStartsOn}
               dataEpoch={dataEpoch}
             />

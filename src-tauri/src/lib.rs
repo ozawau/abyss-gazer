@@ -1,10 +1,11 @@
 mod commands;
 mod db;
 mod system_config;
+mod widget;
 
 #[cfg(desktop)]
 use commands::tray::install_pomodoro_tray;
-use db::{get_db_path, init_db, DbState};
+use db::{get_db_path, init_db, reopen_database, DbState};
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -37,6 +38,7 @@ pub fn run() {
                 conn: Mutex::new(conn),
                 db_path: Mutex::new(db_path),
             });
+            widget::install(app.handle());
             #[cfg(desktop)]
             install_pomodoro_tray(app)?;
             Ok(())
@@ -77,6 +79,8 @@ pub fn run() {
             commands::holidays::write_cn_holidays_cache,
             commands::tray::set_pomodoro_tray,
             get_db_path,
+            reopen_database,
+            widget::request_pin_checkin_widget,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

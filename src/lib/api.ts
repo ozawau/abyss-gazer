@@ -310,6 +310,10 @@ export interface SystemSettings {
   language: LanguagePreference;
   /** Wide layout only. Narrow screens keep the bottom tab bar. */
   sidebarCollapsed: boolean;
+  /** Parent tasks in this category power check-in views and widgets. */
+  checkinCategoryId: string | null;
+  /** Note quick-add widget creates tasks in this category. */
+  noteCategoryId: string | null;
 }
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -324,6 +328,8 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   launchAtLogin: false,
   language: "system",
   sidebarCollapsed: false,
+  checkinCategoryId: null,
+  noteCategoryId: null,
 };
 
 export function getSystemSettings(): Promise<SystemSettings> {
@@ -354,4 +360,13 @@ export function pickDirectory(): Promise<string | null> {
 
 export function runDataSync(): Promise<void> {
   return invoke("run_data_sync");
+}
+
+export function reopenDatabase(): Promise<void> {
+  return invoke("reopen_database");
+}
+
+/** Android only. True when the system pin-widget dialog was shown. */
+export function requestPinCheckinWidget(): Promise<boolean> {
+  return invoke("request_pin_checkin_widget");
 }

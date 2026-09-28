@@ -48,5 +48,48 @@
             android:name="android.support.FILE_PROVIDER_PATHS"
             android:resource="@xml/file_paths" />
         </provider>
+
+        <receiver
+            android:name=".CheckinWidgetProvider"
+            android:exported="true"
+            android:label="@string/checkin_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.abyssgazer.desktop.action.CHECKIN_WIDGET_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/checkin_widget_info" />
+        </receiver>
+
+        <service
+            android:name=".CheckinWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <receiver
+            android:name=".NoteTaskWidgetProvider"
+            android:exported="true"
+            android:label="@string/note_task_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.abyssgazer.desktop.action.NOTE_TASK_WIDGET_REFRESH" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.abyssgazer.desktop.action.NOTE_TASK_WIDGET_ADD" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/note_task_widget_info" />
+        </receiver>
+
+        <activity
+            android:name=".NoteTaskInputActivity"
+            android:exported="false"
+            android:theme="@style/Theme.NoteTaskInputDialog" />
     </application>
 </manifest>

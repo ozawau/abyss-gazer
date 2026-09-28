@@ -1,3 +1,4 @@
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,6 +43,12 @@ pub struct SystemSettings {
     /// Remember whether the desktop sidebar is collapsed. Narrow layouts ignore this.
     #[serde(default)]
     pub sidebar_collapsed: bool,
+    /// Parent tasks in this category appear in check-in views and widgets.
+    #[serde(default)]
+    pub checkin_category_id: Option<String>,
+    /// Quick-add note widget creates tasks in this category.
+    #[serde(default)]
+    pub note_category_id: Option<String>,
 }
 
 fn default_week_starts_on() -> u8 {
@@ -70,6 +77,8 @@ impl Default for SystemSettings {
             launch_at_login: false,
             language: default_language(),
             sidebar_collapsed: false,
+            checkin_category_id: None,
+            note_category_id: None,
         }
     }
 }
@@ -104,6 +113,12 @@ fn normalize_gantt_activity_mode(value: &str) -> String {
     }
 }
 
+fn normalize_optional_id(value: Option<String>) -> Option<String> {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
     let data_dir = settings
         .data_dir
@@ -133,7 +148,77 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
         launch_at_login: settings.launch_at_login,
         language: normalize_language(&settings.language),
         sidebar_collapsed: settings.sidebar_collapsed,
+        checkin_category_id: normalize_optional_id(settings.checkin_category_id),
+        note_category_id: normalize_optional_id(settings.note_category_id),
     }
+}
+
+pub fn category_id_by_name(conn: &Connection, name: &str) -> Result<Option<String>, String> {
+    let needle = name.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(None);
+    }
+    let mut stmt = conn
+        .prepare("SELECT id, name FROM categories")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (id, label) = row.map_err(|e| e.to_string())?;
+        if label.trim().to_lowercase() == needle {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+pub fn ensure_category_id(conn: &Connection, id: &str) -> Result<(), String> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM categories WHERE id = ?1 LIMIT 1",
+            [id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if exists {
+        Ok(())
+    } else {
+        Err("所选任务分类不存在".into())
+    }
+}
+
+/// One-time migration from legacy Habit / Note category names into settings.
+pub fn migrate_legacy_task_category_ids(
+    app: &AppHandle,
+    settings: &mut SystemSettings,
+) -> Result<(), String> {
+    if settings.checkin_category_id.is_some() && settings.note_category_id.is_some() {
+        return Ok(());
+    }
+    let Some(state) = app.try_state::<crate::db::DbState>() else {
+        return Ok(());
+    };
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut changed = false;
+    if settings.checkin_category_id.is_none() {
+        if let Some(id) = category_id_by_name(&conn, "habit")? {
+            settings.checkin_category_id = Some(id);
+            changed = true;
+        }
+    }
+    if settings.note_category_id.is_none() {
+        if let Some(id) = category_id_by_name(&conn, "note")? {
+            settings.note_category_id = Some(id);
+            changed = true;
+        }
+    }
+    drop(conn);
+    if changed {
+        write_system_settings(app, settings)?;
+        crate::widget::request_publish();
+    }
+    Ok(())
 }
 
 /// Default data root (database). Config files live in `~/.config/abyss-gazer`.

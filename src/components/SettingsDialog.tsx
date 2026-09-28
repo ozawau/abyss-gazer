@@ -6,8 +6,10 @@ import {
   getActiveDataDir,
   getDbPath,
   getDefaultDataDir,
+  createCategory,
   getPomodoroSettings,
   getSystemSettings,
+  listCategories,
   pickDirectory,
   PomodoroSettings,
   setDataDirectory,
@@ -17,6 +19,7 @@ import {
   SyncMethod,
   SystemSettings,
   WeekStartsOn,
+  type Category,
   type LanguagePreference,
 } from "../lib/api";
 import {
@@ -31,7 +34,7 @@ import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { ToggleSwitch } from "./ToggleSwitch";
 import { isAndroidDevice, useNarrowViewport } from "../lib/viewport";
 
-type SettingsSection = "pomodoro" | "calendar" | "system" | "about";
+type SettingsSection = "pomodoro" | "calendar" | "tasks" | "system" | "about";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -44,7 +47,7 @@ interface SettingsDialogProps {
 function SettingsSectionIcon({
   id,
 }: {
-  id: "pomodoro" | "calendar" | "system" | "about";
+  id: "pomodoro" | "calendar" | "tasks" | "system" | "about";
 }) {
   const stroke = {
     fill: "none",
@@ -71,6 +74,12 @@ function SettingsSectionIcon({
           <rect x="3.5" y="5" width="17" height="15.5" rx="2" {...stroke} />
           <path d="M3.5 10h17" {...stroke} />
           <path d="M8 3.5v3M16 3.5v3" {...stroke} />
+        </>
+      )}
+      {id === "tasks" && (
+        <>
+          <path d="M9 6h12M9 12h12M9 18h12" {...stroke} />
+          <path d="M5 6h.01M5 12h.01M5 18h.01" {...stroke} />
         </>
       )}
       {id === "system" && (
@@ -118,8 +127,13 @@ export function SettingsDialog({
     DEFAULT_POMODORO_SETTINGS,
   );
   const [system, setSystem] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [activeDataDir, setActiveDataDir] = useState("");
   const [defaultDataDir, setDefaultDataDir] = useState("");
+  const [creatingCheckinCategory, setCreatingCheckinCategory] = useState(false);
+  const [creatingNoteCategory, setCreatingNoteCategory] = useState(false);
+  const [newCheckinCategoryName, setNewCheckinCategoryName] = useState("");
+  const [newNoteCategoryName, setNewNoteCategoryName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -148,13 +162,17 @@ export function SettingsDialog({
       getSystemSettings(),
       getActiveDataDir(),
       getDefaultDataDir(),
+      listCategories(),
     ])
-      .then(([pomodoro, systemSettings, activeDir, defaultDir]) => {
+      .then(([pomodoro, systemSettings, activeDir, defaultDir, categoryRows]) => {
         if (cancelled) return;
         setSettings({ ...DEFAULT_POMODORO_SETTINGS, ...pomodoro });
-        setSystem(systemSettings);
+        setSystem({ ...DEFAULT_SYSTEM_SETTINGS, ...systemSettings });
         setActiveDataDir(activeDir);
         setDefaultDataDir(defaultDir);
+        setCategories(categoryRows);
+        setNewCheckinCategoryName(t("settings.defaultCheckinCategoryName"));
+        setNewNoteCategoryName(t("settings.defaultNoteCategoryName"));
       })
       .catch((err) => {
         if (!cancelled) setError(String(err));
@@ -333,6 +351,37 @@ export function SettingsDialog({
     patchPomodoro({ [key]: SILENT_SOUND } as Partial<PomodoroSettings>);
   }
 
+  async function createAndAssignCategory(
+    role: "checkin" | "note",
+    name: string,
+  ) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const category = await createCategory(trimmed, "#2563eb");
+      setCategories((prev) =>
+        [...prev, category].sort((a, b) => a.name.localeCompare(b.name, "zh")),
+      );
+      const patch =
+        role === "checkin"
+          ? { checkinCategoryId: category.id }
+          : { noteCategoryId: category.id };
+      const next = { ...system, ...patch };
+      setSystem(next);
+      const saved = await setSystemSettings(next);
+      setSystem(saved);
+      onSystemSettingsChange(saved);
+      if (role === "checkin") setCreatingCheckinCategory(false);
+      else setCreatingNoteCategory(false);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function chooseBackupDir() {
     try {
       const selected = await chooseFolder(
@@ -377,6 +426,7 @@ export function SettingsDialog({
               [
                 ["pomodoro", "settings.pomodoro"],
                 ["calendar", "settings.calendar"],
+                ["tasks", "settings.tasks"],
                 ["system", "settings.system"],
                 ["about", "settings.about"],
               ] as const
@@ -683,6 +733,141 @@ export function SettingsDialog({
                     ))}
                   </select>
                 </label>
+              </div>
+            )}
+
+            {section === "tasks" && (
+              <div className="settings-panel">
+                <header className="settings-panel-header">
+                  <h3>{t("settings.tasks")}</h3>
+                  <p>{t("settings.tasksHint")}</p>
+                </header>
+
+                <div className="settings-group">
+                  <label className="settings-row">
+                    <span className="settings-row-label">{t("settings.checkinCategory")}</span>
+                    <select
+                      className="settings-select"
+                      value={system.checkinCategoryId ?? ""}
+                      disabled={busy}
+                      onChange={(e) =>
+                        patchSystem({
+                          checkinCategoryId: e.target.value || null,
+                        })
+                      }
+                    >
+                      <option value="">{t("settings.taskCategoryUnset")}</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="settings-field-hint">{t("settings.checkinCategoryHint")}</p>
+                  {creatingCheckinCategory ? (
+                    <div className="settings-path-block">
+                      <input
+                        type="text"
+                        className="settings-text-input"
+                        value={newCheckinCategoryName}
+                        disabled={busy}
+                        placeholder={t("settings.newCategoryName")}
+                        onChange={(e) => setNewCheckinCategoryName(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        disabled={busy || !newCheckinCategoryName.trim()}
+                        onClick={() =>
+                          void createAndAssignCategory("checkin", newCheckinCategoryName)
+                        }
+                      >
+                        {t("common.confirm")}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        disabled={busy}
+                        onClick={() => setCreatingCheckinCategory(false)}
+                      >
+                        {t("common.cancel")}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy}
+                      onClick={() => setCreatingCheckinCategory(true)}
+                    >
+                      {t("settings.createCheckinCategory")}
+                    </button>
+                  )}
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-row">
+                    <span className="settings-row-label">{t("settings.noteCategory")}</span>
+                    <select
+                      className="settings-select"
+                      value={system.noteCategoryId ?? ""}
+                      disabled={busy}
+                      onChange={(e) =>
+                        patchSystem({
+                          noteCategoryId: e.target.value || null,
+                        })
+                      }
+                    >
+                      <option value="">{t("settings.taskCategoryUnset")}</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="settings-field-hint">{t("settings.noteCategoryHint")}</p>
+                  {creatingNoteCategory ? (
+                    <div className="settings-path-block">
+                      <input
+                        type="text"
+                        className="settings-text-input"
+                        value={newNoteCategoryName}
+                        disabled={busy}
+                        placeholder={t("settings.newCategoryName")}
+                        onChange={(e) => setNewNoteCategoryName(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        disabled={busy || !newNoteCategoryName.trim()}
+                        onClick={() =>
+                          void createAndAssignCategory("note", newNoteCategoryName)
+                        }
+                      >
+                        {t("common.confirm")}
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        disabled={busy}
+                        onClick={() => setCreatingNoteCategory(false)}
+                      >
+                        {t("common.cancel")}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      disabled={busy}
+                      onClick={() => setCreatingNoteCategory(true)}
+                    >
+                      {t("settings.createNoteCategory")}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 

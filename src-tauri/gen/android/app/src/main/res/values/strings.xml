@@ -1,4 +1,20 @@
 <resources>
     <string name="app_name">"Abyss Gazer"</string>
     <string name="main_activity_title">"Abyss Gazer"</string>
+    <string name="checkin_widget_label">Check-in · Abyss Gazer</string>
+    <string name="checkin_widget_description">See today’s habits and tap one to check in</string>
+    <string name="checkin_widget_title">Check-in</string>
+    <string name="checkin_widget_preview_date">Sep 28, Mon</string>
+    <string name="checkin_widget_preview_summary">5 today · 2 done · 3 open</string>
+    <string name="checkin_widget_preview_nudge">3 left, 4-day perfect streak</string>
+    <string name="checkin_widget_preview_open">Still open</string>
+    <string name="checkin_widget_preview_open_task">○  Read</string>
+    <string name="checkin_widget_preview_done">Checked in</string>
+    <string name="checkin_widget_preview_done_task">✓  Wake up</string>
+    <string name="note_task_widget_label">Quick note task (4×1)</string>
+    <string name="note_task_widget_description">Type a title and add a high-priority task to your note category (Settings → Tasks)</string>
+    <string name="note_task_widget_hint">Task title…</string>
+    <string name="note_task_widget_preview_hint">Write a note task…</string>
+    <string name="note_task_widget_add">Add</string>
+    <string name="note_task_widget_dialog_title">New note task</string>
 </resources>

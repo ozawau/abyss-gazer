@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { HabitCheckinDialog } from "../components/HabitCheckinDialog";
 import { useI18n } from "../components/LocaleProvider";
 import { WEEKDAY_SHORT } from "../lib/i18n";
@@ -10,6 +10,7 @@ import {
   listPomodoroSessionsInRange,
   PomodoroSession,
   saveHabitCheckin,
+  SystemSettings,
   Task,
 } from "../lib/api";
 import type { WeekStartsOn } from "../lib/api";
@@ -28,10 +29,18 @@ import {
 import { useCnHolidayRevision } from "../lib/cnHolidayData";
 import { statutoryDayInfo } from "../lib/cnStatutoryDay";
 import { formatLunarDayShort } from "../lib/dateDisplay";
+import { requestPinCheckinWidget } from "../lib/api";
+import { isAndroidDevice } from "../lib/viewport";
 import { descendantIds } from "../lib/taskTree";
+import {
+  categoryNameById,
+  isCheckinRootTask,
+  resolveCheckinCategoryId,
+} from "../lib/taskCategories";
 
 interface CheckinViewProps {
   tasks: Task[];
+  systemSettings: SystemSettings;
   weekStartsOn: WeekStartsOn;
   dataEpoch: number;
 }
@@ -168,15 +177,14 @@ function checkinTotals(
   return { perfectDays, checked, missed };
 }
 
-function isHabitRoot(task: Task, categories: Map<string, Category>): boolean {
-  if (task.parent_id) return false;
-  if (!task.category_id) return false;
-  const name = categories.get(task.category_id)?.name ?? "";
-  return name.trim().toLowerCase() === "habit";
-}
-
-export function CheckinView({ tasks, weekStartsOn, dataEpoch }: CheckinViewProps) {
+export function CheckinView({
+  tasks,
+  systemSettings,
+  weekStartsOn,
+  dataEpoch,
+}: CheckinViewProps) {
   const { locale, t } = useI18n();
+  const android = isAndroidDevice();
   useCnHolidayRevision();
   const today = useMemo(() => startOfLocalDay(new Date()), []);
   const [mode, setMode] = useState<CheckinMode>("week");
@@ -188,21 +196,24 @@ export function CheckinView({ tasks, weekStartsOn, dataEpoch }: CheckinViewProps
   const [streakManual, setStreakManual] = useState<Set<string>>(() => new Set());
   const [streakSessions, setStreakSessions] = useState<PomodoroSession[]>([]);
   const [editor, setEditor] = useState<{ habit: Task; day: Date } | null>(null);
+  const pendingHabitRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const categoryMap = useMemo(() => {
-    const map = new Map<string, Category>();
-    for (const category of categories) map.set(category.id, category);
-    return map;
-  }, [categories]);
+  const checkinCategoryId = useMemo(
+    () => resolveCheckinCategoryId(systemSettings, categories),
+    [systemSettings, categories],
+  );
+  const checkinCategoryName =
+    categoryNameById(categories, checkinCategoryId) ??
+    t("checkin.unconfiguredCategory");
 
   const habits = useMemo(
     () =>
       tasks
-        .filter((task) => isHabitRoot(task, categoryMap))
+        .filter((task) => isCheckinRootTask(task, checkinCategoryId))
         .sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title, "zh")),
-    [tasks, categoryMap],
+    [tasks, checkinCategoryId],
   );
 
   const historyStart = useMemo(() => {
@@ -221,6 +232,39 @@ export function CheckinView({ tasks, weekStartsOn, dataEpoch }: CheckinViewProps
         : buildMonthGrid(cursor, weekStartsOn),
     [mode, cursor, weekStartsOn],
   );
+
+  function openHabitEditor(habitId: string) {
+    const habit = tasks.find((task) => task.id === habitId);
+    if (!habit) {
+      pendingHabitRef.current = habitId;
+      return;
+    }
+    pendingHabitRef.current = null;
+    setEditor({ habit, day: startOfLocalDay(new Date()) });
+  }
+
+  useEffect(() => {
+    if (!pendingHabitRef.current) return;
+    const habit = tasks.find((task) => task.id === pendingHabitRef.current);
+    if (!habit) return;
+    pendingHabitRef.current = null;
+    setEditor({ habit, day: startOfLocalDay(new Date()) });
+  }, [tasks]);
+
+  useEffect(() => {
+    const win = window as Window & { __abyssPendingCheckinHabit?: string | null };
+    function onOpenHabit(event: Event) {
+      const detail = (event as CustomEvent<{ habitId?: string }>).detail;
+      if (detail?.habitId) openHabitEditor(detail.habitId);
+    }
+    window.addEventListener("abyss-open-checkin-habit", onOpenHabit);
+    if (win.__abyssPendingCheckinHabit) {
+      const id = win.__abyssPendingCheckinHabit;
+      win.__abyssPendingCheckinHabit = null;
+      openHabitEditor(id);
+    }
+    return () => window.removeEventListener("abyss-open-checkin-habit", onOpenHabit);
+  }, [tasks]);
 
   useEffect(() => {
     let cancelled = false;
@@ -415,6 +459,17 @@ export function CheckinView({ tasks, weekStartsOn, dataEpoch }: CheckinViewProps
     setEditor({ habit: task, day });
   }
 
+  async function addHomeWidget() {
+    if (!android) return;
+    setError(null);
+    try {
+      const started = await requestPinCheckinWidget();
+      if (!started) setError(t("checkin.addWidgetUnsupported"));
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
   async function saveCheckin(input: {
     checked: boolean;
     note: string;
@@ -466,7 +521,7 @@ export function CheckinView({ tasks, weekStartsOn, dataEpoch }: CheckinViewProps
       <header className="view-header calendar-header">
         <div className="calendar-header-main">
           <h1>{t("checkin.title")}</h1>
-          <p>{t("checkin.hint")}</p>
+          <p>{t("checkin.hint", { category: checkinCategoryName })}</p>
         </div>
         <div className="calendar-toolbar">
           <div className="calendar-mode-tabs" role="tablist" aria-label={t("checkin.view")}>
@@ -489,6 +544,16 @@ export function CheckinView({ tasks, weekStartsOn, dataEpoch }: CheckinViewProps
             ))}
           </div>
           <div className="calendar-nav">
+            {android && (
+              <button
+                type="button"
+                className="secondary-btn"
+                title={t("checkin.addWidgetHint")}
+                onClick={() => void addHomeWidget()}
+              >
+                {t("checkin.addWidget")}
+              </button>
+            )}
             <button
               type="button"
               className="secondary-btn"
@@ -530,7 +595,9 @@ export function CheckinView({ tasks, weekStartsOn, dataEpoch }: CheckinViewProps
 
       {habits.length === 0 && (
         <p className="habit-empty">
-          {t("checkin.empty")}
+          {!checkinCategoryId
+            ? t("checkin.noCategoryConfigured")
+            : t("checkin.empty", { category: checkinCategoryName })}
         </p>
       )}
 
