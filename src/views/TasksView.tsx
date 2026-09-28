@@ -1,11 +1,13 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import { CategoryDialog } from "../components/CategoryDialog";
 import { CategoryPicker } from "../components/CategoryPicker";
@@ -35,14 +37,17 @@ import {
   updateTask,
 } from "../lib/api";
 import {
+  formatDateTime,
   formatGregorianDate,
   formatLunarDate,
   formatWeekday,
   splitDurationMinutes,
 } from "../lib/dateDisplay";
 import { isTaskStarted } from "../lib/taskSchedule";
+import { isAndroidDevice } from "../lib/viewport";
 import {
   applyAncestorFields,
+  ancestorTasks,
   childIdSet,
   flattenTaskTree,
   removeTaskTree,
@@ -287,12 +292,17 @@ export function TasksView({
   dataEpoch,
 }: TasksViewProps) {
   const { locale, t } = useI18n();
+  const android = isAndroidDevice();
   const [draft, setDraft] = useState("");
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
   const [draftEstimate, setDraftEstimate] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [hoverTaskId, setHoverTaskId] = useState<string | null>(null);
+  const hoverPos = useRef({ x: 0, y: 0 });
+  const hoverAnchor = useRef<DOMRect | null>(null);
+  const hoverCardRef = useRef<HTMLDivElement>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
@@ -776,6 +786,20 @@ export function TasksView({
     setCreateFor(null);
   }
 
+  function showTaskHover(id: string, x: number, y: number) {
+    if (dragRef.current) return;
+    hoverPos.current = { x, y };
+    setHoverTaskId((prev) => (prev === id ? prev : id));
+    placeTaskHoverCard(hoverCardRef.current, x, y);
+  }
+
+  function moveTaskHover(id: string, x: number, y: number) {
+    if (dragRef.current) return;
+    hoverPos.current = { x, y };
+    setHoverTaskId((prev) => (prev === id ? prev : id));
+    placeTaskHoverCard(hoverCardRef.current, x, y);
+  }
+
   function beginDrag(
     task: Task,
     clientX: number,
@@ -792,6 +816,7 @@ export function TasksView({
     };
     dragRef.current = next;
     setDrag(next);
+    setHoverTaskId(null);
     setDropTarget({
       priority: normalizePriority(task.priority) ?? "medium",
       parentId: task.parent_id,
@@ -865,6 +890,14 @@ export function TasksView({
       return;
     }
     onSelectTask(task.id);
+    if (android) openSelectedTaskCard(task.id, e.currentTarget);
+  }
+
+  function openSelectedTaskCard(id: string, row: HTMLElement) {
+    const anchor = row.getBoundingClientRect();
+    hoverAnchor.current = anchor;
+    setHoverTaskId((prev) => (prev === id ? prev : id));
+    placeAnchoredTaskCard(hoverCardRef.current, anchor);
   }
 
   function toggleCollapsed(id: string) {
@@ -951,6 +984,25 @@ export function TasksView({
                   style={{ ["--task-depth" as string]: String(depth) }}
                   onPointerDown={(e) => armRowPointer(e, task)}
                   onClick={(e) => onRowClick(e, task)}
+                  onMouseEnter={
+                    android
+                      ? undefined
+                      : (e) => showTaskHover(task.id, e.clientX, e.clientY)
+                  }
+                  onMouseMove={
+                    android
+                      ? undefined
+                      : (e) => moveTaskHover(task.id, e.clientX, e.clientY)
+                  }
+                  onMouseLeave={
+                    android
+                      ? undefined
+                      : (e) => {
+                          const next = e.relatedTarget;
+                          if (next instanceof Element && next.closest(".task-row")) return;
+                          setHoverTaskId(null);
+                        }
+                  }
                   onDoubleClick={(e) => {
                     const target = e.target as HTMLElement;
                     if (
@@ -961,6 +1013,7 @@ export function TasksView({
                       return;
                     }
                     setDetailTask(task);
+                    if (android) setHoverTaskId(null);
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
@@ -1046,6 +1099,7 @@ export function TasksView({
                       onClick={(e) => {
                         e.stopPropagation();
                         setDetailTask(task);
+                        if (android) setHoverTaskId(null);
                       }}
                       disabled={busy}
                     >
@@ -1072,6 +1126,30 @@ export function TasksView({
       </section>
     );
   }
+
+  const hoverTask = hoverTaskId
+    ? tasks.find((task) => task.id === hoverTaskId) ?? null
+    : null;
+  useLayoutEffect(() => {
+    if (!hoverTask) return;
+    if (android && hoverAnchor.current) {
+      placeAnchoredTaskCard(hoverCardRef.current, hoverAnchor.current);
+    } else {
+      placeTaskHoverCard(hoverCardRef.current, hoverPos.current.x, hoverPos.current.y);
+    }
+  }, [hoverTask, android]);
+
+  useEffect(() => {
+    if (!android || !hoverTaskId) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".task-hover-card, .task-row")) return;
+      setHoverTaskId(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [android, hoverTaskId]);
 
   return (
     <div className="view tasks-view">
@@ -1229,6 +1307,21 @@ export function TasksView({
         )}
       </div>
 
+      {hoverTask && !drag && (
+        <TaskHoverCard
+          cardRef={hoverCardRef}
+          task={hoverTask}
+          parents={ancestorTasks(hoverTask, taskById(tasks)).reverse()}
+          category={
+            hoverTask.category_id
+              ? categoryMap.get(hoverTask.category_id) ?? null
+              : null
+          }
+          pinned={android}
+          onDismiss={() => setHoverTaskId(null)}
+        />
+      )}
+
       {drag && (
         <div
           className="drag-ghost"
@@ -1364,6 +1457,111 @@ export function TasksView({
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function placeAnchoredTaskCard(el: HTMLDivElement | null, anchor: DOMRect) {
+  if (!el) return;
+  const margin = 8;
+  const width = el.offsetWidth;
+  const height = el.offsetHeight;
+  let top = anchor.bottom + 8;
+  if (top + height > window.innerHeight - margin) {
+    top = anchor.top - height - 8;
+  }
+  if (top < margin) top = margin;
+  const left = Math.min(
+    Math.max(margin, anchor.left),
+    Math.max(margin, window.innerWidth - width - margin),
+  );
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+}
+
+function placeTaskHoverCard(el: HTMLDivElement | null, x: number, y: number) {
+  if (!el) return;
+  const margin = 8;
+  const width = el.offsetWidth;
+  const height = el.offsetHeight;
+  const left = Math.min(
+    Math.max(margin, x + 14),
+    Math.max(margin, window.innerWidth - width - margin),
+  );
+  const top = Math.min(
+    Math.max(margin, y + 16),
+    Math.max(margin, window.innerHeight - height - margin),
+  );
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+}
+
+function TaskHoverCard({
+  cardRef,
+  task,
+  parents,
+  category,
+  pinned,
+  onDismiss,
+}: {
+  cardRef: RefObject<HTMLDivElement | null>;
+  task: Task;
+  parents: Task[];
+  category: Category | null;
+  pinned: boolean;
+  onDismiss: () => void;
+}) {
+  const { locale, t } = useI18n();
+  useDismissOnAndroidBack(pinned, onDismiss, cardRef);
+  const notes = task.notes.trim();
+  return (
+    <div
+      ref={cardRef}
+      className={`task-hover-card${pinned ? " is-pinned" : ""}`}
+      role="tooltip"
+    >
+      <strong>{task.title}</strong>
+      {parents.length > 0 && (
+        <p className="task-hover-parents">
+          <span>{t("tasks.parents")}</span>
+          {parents.map((parent) => (
+            <span key={parent.id}>{parent.title}</span>
+          ))}
+        </p>
+      )}
+      <p className="task-hover-category">
+        <span>{t("common.category")}</span>
+        {category ? (
+          <>
+            <span
+              className="category-swatch"
+              style={{ background: category.color }}
+              aria-hidden
+            />
+            <span>{category.name}</span>
+          </>
+        ) : (
+          <span>{t("common.noCategory")}</span>
+        )}
+      </p>
+      <p>
+        {t("clock.progress", {
+          done: formatPomodoroAmount(task.completed_pomodoros ?? 0),
+          estimate: task.estimate_pomodoros ?? 0,
+        })}
+      </p>
+      <p>
+        {t("detail.start")} {formatDateTime(task.start_at, locale)}
+      </p>
+      <p>
+        {t("detail.due")} {formatDateTime(task.due_at, locale)}
+      </p>
+      {notes && (
+        <p>
+          {t("detail.notes")}
+          <span className="task-hover-notes">{notes}</span>
+        </p>
       )}
     </div>
   );
