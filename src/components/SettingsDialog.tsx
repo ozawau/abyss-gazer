@@ -1,5 +1,5 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_POMODORO_SETTINGS,
   DEFAULT_SYSTEM_SETTINGS,
@@ -27,7 +27,9 @@ import {
 } from "../lib/pomodoroChime";
 import { APP_VERSION, RELEASE_NOTES } from "../lib/changelog";
 import { publishSystemSettings, useI18n } from "./LocaleProvider";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { ToggleSwitch } from "./ToggleSwitch";
+import { isAndroidDevice, useNarrowViewport } from "../lib/viewport";
 
 type SettingsSection = "pomodoro" | "calendar" | "system" | "about";
 
@@ -37,6 +39,61 @@ interface SettingsDialogProps {
   onPomodoroSettingsChange: (settings: PomodoroSettings) => void;
   onSystemSettingsChange: (settings: SystemSettings) => void;
   onDataPathChange: (dbPath: string) => void;
+}
+
+function SettingsSectionIcon({
+  id,
+}: {
+  id: "pomodoro" | "calendar" | "system" | "about";
+}) {
+  const stroke = {
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.5,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  return (
+    <svg className="settings-nav-icon" viewBox="0 0 24 24" aria-hidden>
+      {id === "pomodoro" && (
+        <>
+          <path d="M17 13H12V8" {...stroke} />
+          <path d="M5 3.5L7 2" {...stroke} />
+          <path d="M19 3.5L17 2" {...stroke} />
+          <path
+            d="M12 22C16.9706 22 21 17.9706 21 13C21 8.02944 16.9706 4 12 4C7.02944 4 3 8.02944 3 13C3 17.9706 7.02944 22 12 22Z"
+            {...stroke}
+          />
+        </>
+      )}
+      {id === "calendar" && (
+        <>
+          <rect x="3.5" y="5" width="17" height="15.5" rx="2" {...stroke} />
+          <path d="M3.5 10h17" {...stroke} />
+          <path d="M8 3.5v3M16 3.5v3" {...stroke} />
+        </>
+      )}
+      {id === "system" && (
+        <>
+          <path
+            d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z"
+            {...stroke}
+          />
+          <path
+            d="M19.6224 10.3954L18.5247 7.7448L20 6L18 4L16.2647 5.48295L13.5578 4.36974L12.9353 2H10.981L10.3491 4.40113L7.70441 5.51596L6 4L4 6L5.45337 7.78885L4.3725 10.4463L2 11V13L4.40111 13.6555L5.51575 16.2997L4 18L6 20L7.79116 18.5403L10.397 19.6123L11 22H13L13.6045 19.6132L16.2551 18.5155C16.6969 18.8313 18 20 18 20L20 18L18.5159 16.2494L19.6139 13.598L21.9999 12.9772L22 11L19.6224 10.3954Z"
+            {...stroke}
+          />
+        </>
+      )}
+      {id === "about" && (
+        <>
+          <circle cx="12" cy="12" r="9" {...stroke} />
+          <path d="M12 11v6" {...stroke} />
+          <path d="M12 8h.01" {...stroke} />
+        </>
+      )}
+    </svg>
+  );
 }
 
 function clampMinutes(value: number, fallback: number): number {
@@ -65,7 +122,13 @@ export function SettingsDialog({
   const [defaultDataDir, setDefaultDataDir] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
+  const narrow = useNarrowViewport();
+  const iconNav = isAndroidDevice() && narrow;
+  useDismissOnAndroidBack(open, () => {
+    if (!busy) onClose();
+  }, rootRef);
   const weekStartOptions: { value: WeekStartsOn; label: string }[] = [
     { value: 1, label: t("settings.weekday.mon") },
     { value: 2, label: t("settings.weekday.tue") },
@@ -288,7 +351,7 @@ export function SettingsDialog({
   const syncOff = !system.syncEnabled;
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div ref={rootRef} className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className="modal-card settings-dialog"
         role="dialog"
@@ -310,42 +373,28 @@ export function SettingsDialog({
 
         <div className="settings-dialog-body">
           <nav className="settings-dialog-nav" aria-label={t("settings.nav")}>
-            <button
-              type="button"
-              className={`settings-nav-item${
-                section === "pomodoro" ? " is-active" : ""
-              }`}
-              onClick={() => setSection("pomodoro")}
-            >
-              {t("settings.pomodoro")}
-            </button>
-            <button
-              type="button"
-              className={`settings-nav-item${
-                section === "calendar" ? " is-active" : ""
-              }`}
-              onClick={() => setSection("calendar")}
-            >
-              {t("settings.calendar")}
-            </button>
-            <button
-              type="button"
-              className={`settings-nav-item${
-                section === "system" ? " is-active" : ""
-              }`}
-              onClick={() => setSection("system")}
-            >
-              {t("settings.system")}
-            </button>
-            <button
-              type="button"
-              className={`settings-nav-item${
-                section === "about" ? " is-active" : ""
-              }`}
-              onClick={() => setSection("about")}
-            >
-              {t("settings.about")}
-            </button>
+            {(
+              [
+                ["pomodoro", "settings.pomodoro"],
+                ["calendar", "settings.calendar"],
+                ["system", "settings.system"],
+                ["about", "settings.about"],
+              ] as const
+            ).map(([id, labelKey]) => {
+              const label = t(labelKey);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`settings-nav-item${section === id ? " is-active" : ""}`}
+                  onClick={() => setSection(id)}
+                  aria-label={label}
+                  title={iconNav ? label : undefined}
+                >
+                  {iconNav ? <SettingsSectionIcon id={id} /> : label}
+                </button>
+              );
+            })}
           </nav>
 
           <div className="settings-dialog-content">

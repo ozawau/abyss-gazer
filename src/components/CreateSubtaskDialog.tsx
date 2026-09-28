@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { useI18n } from "./LocaleProvider";
 
 interface CreateSubtaskDialogProps {
@@ -15,7 +16,11 @@ export function CreateSubtaskDialog({
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
+  useDismissOnAndroidBack(open, () => {
+    if (!busy) onClose();
+  }, rootRef);
 
   useEffect(() => {
     if (!open) return;
@@ -43,7 +48,7 @@ export function CreateSubtaskDialog({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={() => !busy && onClose()}>
+    <div ref={rootRef} className="modal-backdrop" role="presentation" onClick={() => !busy && onClose()}>
       <div
         className="modal-card"
         role="dialog"

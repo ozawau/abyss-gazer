@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { TaskPriority } from "../lib/api";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { useI18n } from "./LocaleProvider";
 
 export type TaskMoveAction = "top" | "up" | "down" | "bottom";
@@ -43,6 +44,7 @@ function MenuBranch({
   const branchRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState({ left: false, up: false });
+  useDismissOnAndroidBack(open, () => setOpen(false), branchRef);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -97,6 +99,7 @@ export function TaskRowMenu({
   const { t } = useI18n();
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
+  useDismissOnAndroidBack(true, onClose, menuRef);
 
   useLayoutEffect(() => {
     const el = menuRef.current;

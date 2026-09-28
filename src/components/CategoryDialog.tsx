@@ -1,5 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Category } from "../lib/api";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { useI18n } from "./LocaleProvider";
 
 export const CATEGORY_COLORS = [
@@ -34,7 +35,15 @@ export function CategoryDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const confirmRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
+  useDismissOnAndroidBack(open, () => {
+    if (!busy) onClose();
+  }, rootRef);
+  useDismissOnAndroidBack(open && confirmDelete, () => {
+    if (!busy) setConfirmDelete(false);
+  }, confirmRef);
 
   useEffect(() => {
     if (!open) return;
@@ -87,7 +96,7 @@ export function CategoryDialog({
     : [color, ...CATEGORY_COLORS];
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div ref={rootRef} className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className="modal-card"
         role="dialog"
@@ -127,7 +136,7 @@ export function CategoryDialog({
           </div>
 
           {confirmDelete && (
-            <div className="delete-confirm">
+            <div ref={confirmRef} className="delete-confirm">
               <p>
                 {t("category.deleteBody", { name: initial?.name ?? "" })}
               </p>

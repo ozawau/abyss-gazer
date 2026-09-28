@@ -2096,6 +2096,29 @@ body.is-task-dragging * {
   min-width: 0;
 }
 
+html.is-narrow.is-android .settings-dialog-body {
+  grid-template-columns: 3.15rem 1fr;
+}
+
+html.is-narrow.is-android .settings-dialog-nav {
+  align-items: center;
+  padding: 0.55rem 0.3rem;
+}
+
+html.is-narrow.is-android .settings-nav-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.45rem;
+  height: 2.45rem;
+  padding: 0;
+}
+
+html.is-narrow.is-android .settings-nav-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
 .settings-panel-header {
   margin-bottom: 1rem;
 }

@@ -18,7 +18,7 @@ import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import { FullscreenIcon } from "../components/FullscreenIcon";
 import { useI18n } from "../components/LocaleProvider";
 import type { AppLocale } from "../lib/i18n";
-import { ANDROID_BACK_EVENT } from "../lib/androidBack";
+import { ANDROID_BACK_EVENT, useDismissOnAndroidBack } from "../lib/androidBack";
 import { isAndroidDevice, useNarrowViewport } from "../lib/viewport";
 import {
   buildGanttDayRange,
@@ -585,6 +585,7 @@ export function GanttView({
           x={hover.x}
           y={hover.y}
           rotated={android}
+          onDismiss={() => setHover(null)}
           category={
             hover.task.category_id
               ? categoryMap.get(hover.task.category_id) ?? null
@@ -912,6 +913,7 @@ function GanttTaskHover({
   x,
   y,
   rotated,
+  onDismiss,
   category,
 }: {
   task: Task;
@@ -919,10 +921,12 @@ function GanttTaskHover({
   x: number;
   y: number;
   rotated: boolean;
+  onDismiss: () => void;
   category: Category | null;
 }) {
   const { locale, t } = useI18n();
   const cardRef = useRef<HTMLDivElement>(null);
+  useDismissOnAndroidBack(true, onDismiss, cardRef);
   const [size, setSize] = useState({ width: 240, height: 120 });
   useLayoutEffect(() => {
     const el = cardRef.current;

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
 import { TaskLineageTitle } from "../components/TaskLineageTitle";
 import { TaskRowMenu } from "../components/TaskRowMenu";
 import { useI18n } from "../components/LocaleProvider";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { formatDateTime } from "../lib/dateDisplay";
 import {
   Category,
@@ -58,6 +59,10 @@ export function UpcomingTasksView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Task | null>(null);
+  const deleteDialogRef = useRef<HTMLDivElement>(null);
+  useDismissOnAndroidBack(pendingDelete != null, () => {
+    if (!busy) setPendingDelete(null);
+  }, deleteDialogRef);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [rowMenu, setRowMenu] = useState<{
     task: Task;
@@ -388,6 +393,7 @@ export function UpcomingTasksView({
 
       {pendingDelete && (
         <div
+          ref={deleteDialogRef}
           className="modal-backdrop"
           role="presentation"
           onClick={() => !busy && setPendingDelete(null)}

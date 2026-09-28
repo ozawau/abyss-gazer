@@ -21,7 +21,7 @@ import { type GanttActivityMode } from "./lib/gantt";
 import { syncPomodoroPresence } from "./lib/pomodoroPresence";
 import { type PomodoroTick } from "./lib/pomodoroTimer";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
-import { ANDROID_BACK_EVENT } from "./lib/androidBack";
+import { ANDROID_BACK_EVENT, dismissTopAndroidPopup, useDismissOnAndroidBack } from "./lib/androidBack";
 import { isAndroidDevice, useNarrowViewport } from "./lib/viewport";
 import { formatTaskLineage, taskById } from "./lib/taskTree";
 import type { TasksSubPage } from "./lib/tasksNav";
@@ -108,6 +108,7 @@ function MainApp() {
   const [calendarCategoryFilter, setCalendarCategoryFilter] =
     useState<CategoryFilter>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const syncErrorRef = useRef<HTMLDivElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const systemReady = useRef(false);
   const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings>(
@@ -117,6 +118,7 @@ function MainApp() {
     DEFAULT_SYSTEM_SETTINGS,
   );
   const [syncError, setSyncError] = useState<string | null>(null);
+  useDismissOnAndroidBack(syncError != null, () => setSyncError(null), syncErrorRef);
   const [dataEpoch, setDataEpoch] = useState(0);
   const tasksLoadGen = useRef(0);
 
@@ -357,6 +359,7 @@ function MainApp() {
     }
 
     window.__abyssHandleBack = () => {
+      if (dismissTopAndroidPopup()) return "handled";
       const backEvent = new CustomEvent(ANDROID_BACK_EVENT, { cancelable: true });
       if (!window.dispatchEvent(backEvent)) return "handled";
       const now = Date.now();
@@ -537,6 +540,7 @@ function MainApp() {
 
       {syncError && (
         <div
+          ref={syncErrorRef}
           className="modal-backdrop"
           role="presentation"
           onClick={() => setSyncError(null)}

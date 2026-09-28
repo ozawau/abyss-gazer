@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Task } from "../lib/api";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { dayKey } from "../lib/calendar";
 import { formatGregorianDate } from "../lib/dateDisplay";
 import { flattenTaskTree } from "../lib/taskTree";
@@ -36,6 +37,10 @@ export function HabitCheckinDialog({
   const [checked, setChecked] = useState(initialChecked);
   const [note, setNote] = useState(initialNote);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelected));
+  const rootRef = useRef<HTMLDivElement>(null);
+  useDismissOnAndroidBack(!!habit && !!day, () => {
+    if (!busy) onCancel();
+  }, rootRef);
 
   const dayToken = day ? dayKey(day) : "";
   const selectedToken = initialSelected.join("\n");
@@ -93,7 +98,7 @@ export function HabitCheckinDialog({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={() => !busy && onCancel()}>
+    <div ref={rootRef} className="modal-backdrop" role="presentation" onClick={() => !busy && onCancel()}>
       <div
         className="modal-card task-detail-card habit-checkin-card"
         role="dialog"

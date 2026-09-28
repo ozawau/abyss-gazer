@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Category, Task } from "../lib/api";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { formatDateTime } from "../lib/dateDisplay";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import { CategoryPicker } from "./CategoryPicker";
@@ -68,7 +69,15 @@ export function TaskDetailDialog({
   const [subtaskBusy, setSubtaskBusy] = useState(false);
   const [subtaskError, setSubtaskError] = useState<string | null>(null);
   const seenCategoryToken = useRef(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const subtaskRef = useRef<HTMLDivElement>(null);
   const { locale, t } = useI18n();
+  useDismissOnAndroidBack(open, () => {
+    if (!busy && !subtaskBusy) onClose();
+  }, rootRef);
+  useDismissOnAndroidBack(subtaskOpen, () => {
+    if (!subtaskBusy) setSubtaskOpen(false);
+  }, subtaskRef);
 
   useEffect(() => {
     if (!open || !task) return;
@@ -130,7 +139,7 @@ export function TaskDetailDialog({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div ref={rootRef} className="modal-backdrop" role="presentation" onClick={onClose}>
       <div
         className="modal-card task-detail-card"
         role="dialog"
@@ -284,6 +293,7 @@ export function TaskDetailDialog({
 
       {subtaskOpen && (
         <div
+          ref={subtaskRef}
           className="modal-backdrop"
           role="presentation"
           onClick={(e) => {

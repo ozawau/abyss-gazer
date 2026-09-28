@@ -17,6 +17,7 @@ import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
 import { TaskRowMenu, type TaskMoveAction } from "../components/TaskRowMenu";
 import { useI18n } from "../components/LocaleProvider";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import {
   Category,
@@ -308,6 +309,10 @@ export function TasksView({
   } | null>(null);
   const [subtaskParent, setSubtaskParent] = useState<Task | null>(null);
   const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
+  const deleteDialogRef = useRef<HTMLDivElement>(null);
+  useDismissOnAndroidBack(pendingDeleteTask != null, () => {
+    if (!busy) setPendingDeleteTask(null);
+  }, deleteDialogRef);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [todayFocusByTask, setTodayFocusByTask] = useState<Map<string, number>>(
     () => new Map(),
@@ -1319,6 +1324,7 @@ export function TasksView({
 
       {pendingDeleteTask && (
         <div
+          ref={deleteDialogRef}
           className="modal-backdrop"
           role="presentation"
           onClick={() => !busy && setPendingDeleteTask(null)}

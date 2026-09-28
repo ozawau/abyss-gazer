@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Category } from "../lib/api";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { useI18n } from "./LocaleProvider";
 
 interface CategoryPickerProps {
@@ -24,6 +25,7 @@ export function CategoryPicker({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
+  useDismissOnAndroidBack(open, () => setOpen(false), rootRef);
 
   const selected = categories.find((c) => c.id === value) ?? null;
 
