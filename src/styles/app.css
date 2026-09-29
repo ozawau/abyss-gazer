@@ -978,6 +978,19 @@ html.is-android .tasks-view .task-row {
   font-weight: 600;
 }
 
+.filter-chip.is-empty {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.filter-chip.is-empty:hover {
+  background: #fff;
+}
+
+.filter-chip.is-empty.is-active {
+  opacity: 0.55;
+}
+
 .category-picker {
   position: relative;
   min-width: 0;

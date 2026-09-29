@@ -396,24 +396,38 @@ export function TasksView({
     return map;
   }, [categories]);
 
-  const currentTasks = useMemo(
-    () =>
-      withAncestors(
-        tasks.filter(
-          (task) => task.status !== "done" && isTaskStarted(task, nowMs),
-        ),
-        tasks,
-      ),
-    [tasks, nowMs],
+  const openTodoTasks = useMemo(
+    () => tasks.filter((task) => task.status !== "done"),
+    [tasks],
   );
 
-  const showUncategorizedFilter = currentTasks.some((task) => !task.category_id);
+  const categoryHasOpenTodos = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of openTodoTasks) {
+      if (task.category_id) ids.add(task.category_id);
+    }
+    return ids;
+  }, [openTodoTasks]);
+
+  const showUncategorizedFilter = openTodoTasks.some((task) => !task.category_id);
 
   useEffect(() => {
     if (!showUncategorizedFilter && categoryFilter === "none") {
       onCategoryFilterChange("all");
     }
-  }, [showUncategorizedFilter, categoryFilter, onCategoryFilterChange]);
+    if (
+      categoryFilter !== "all" &&
+      categoryFilter !== "none" &&
+      !categoryHasOpenTodos.has(categoryFilter)
+    ) {
+      onCategoryFilterChange("all");
+    }
+  }, [
+    showUncategorizedFilter,
+    categoryFilter,
+    categoryHasOpenTodos,
+    onCategoryFilterChange,
+  ]);
 
   useEffect(() => {
     setDraftCategoryId(categoryIdFromFilter(categoryFilter));
@@ -1284,12 +1298,19 @@ export function TasksView({
             {t("common.uncategorized")}
           </button>
         )}
-        {categories.map((c) => (
+        {categories.map((c) => {
+          const hasOpen = categoryHasOpenTodos.has(c.id);
+          return (
           <button
             key={c.id}
             type="button"
-            className={`filter-chip${categoryFilter === c.id ? " is-active" : ""}`}
-            onClick={() => onCategoryFilterChange(c.id)}
+            className={`filter-chip${categoryFilter === c.id ? " is-active" : ""}${
+              !hasOpen ? " is-empty" : ""
+            }`}
+            onClick={() => {
+              if (!hasOpen) return;
+              onCategoryFilterChange(c.id);
+            }}
             onDoubleClick={() => openEditCategory(c)}
             title={t("category.edit")}
           >
@@ -1300,7 +1321,8 @@ export function TasksView({
             />
             {c.name}
           </button>
-        ))}
+          );
+        })}
       </div>
       <div className="task-tree-actions">
         <button
