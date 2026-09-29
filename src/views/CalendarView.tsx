@@ -1,5 +1,14 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useI18n } from "../components/LocaleProvider";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import {
   Category,
   listCategories,
@@ -42,9 +51,10 @@ import {
   statutoryDayInfo,
   statutoryDayTitle,
 } from "../lib/cnStatutoryDay";
-import { formatLunarDayShort } from "../lib/dateDisplay";
+import { formatLunarDayShort, formatShortDate } from "../lib/dateDisplay";
+import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import { formatTaskLineage, leafTasks } from "../lib/taskTree";
-import { useNarrowViewport } from "../lib/viewport";
+import { isAndroidDevice, useNarrowViewport } from "../lib/viewport";
 
 interface CalendarViewProps {
   tasks: Task[];
@@ -64,6 +74,14 @@ function densityClass(count: number): string {
   return " density-3";
 }
 
+interface WeekFocusDetail {
+  task: Task;
+  session: PomodoroSession;
+  day: Date;
+  x: number;
+  y: number;
+}
+
 export function CalendarView({
   tasks,
   selectedTaskId,
@@ -77,8 +95,12 @@ export function CalendarView({
   const { locale, t } = useI18n();
   useCnHolidayRevision();
   const viewRef = useRef<HTMLDivElement>(null);
+  const weekViewportRef = useRef<HTMLDivElement>(null);
   const today = useMemo(() => startOfLocalDay(new Date()), []);
+  const android = isAndroidDevice();
   const narrow = useNarrowViewport();
+  const [weekBoardBox, setWeekBoardBox] = useState({ width: 0, height: 0 });
+  const [weekDetail, setWeekDetail] = useState<WeekFocusDetail | null>(null);
   const [mode, setMode] = useState<CalendarMode>("month");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
   const [selectedDay, setSelectedDay] = useState<Date>(() =>
@@ -92,6 +114,51 @@ export function CalendarView({
   useEffect(() => {
     if (narrow && mode === "year") setMode("month");
   }, [narrow, mode]);
+
+  useEffect(() => {
+    if (mode !== "week") setWeekDetail(null);
+  }, [mode]);
+
+  useLayoutEffect(() => {
+    if (!android || mode !== "week") return;
+    const viewport = weekViewportRef.current;
+    if (!viewport) return;
+    const measure = () => {
+      const next = {
+        width: viewport.clientWidth,
+        height: viewport.clientHeight,
+      };
+      setWeekBoardBox((prev) =>
+        prev.width === next.width && prev.height === next.height ? prev : next,
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [android, mode]);
+
+  const toggleWeekDetail = useCallback((detail: WeekFocusDetail) => {
+    setWeekDetail((prev) =>
+      prev?.session.id === detail.session.id ? null : detail,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!android || !weekDetail) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (
+        target.closest(".calendar-week-focus-card, .calendar-week-color-block")
+      ) {
+        return;
+      }
+      setWeekDetail(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [android, weekDetail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -345,21 +412,51 @@ export function CalendarView({
               onSelectDay={(day) => selectDay(day)}
             />
           )}
-          {mode === "week" && (
-            <WeekGrid
-              anchor={cursor}
-              today={today}
-              selectedDay={selectedDay}
-              sessions={visibleSessions}
-              taskMap={taskMap}
-              categoryMap={categoryMap}
-              weekdays={weekdays}
-              weekStartsOn={weekStartsOn}
-              onSelectDay={(day) => selectDay(day)}
-              onSelectTask={onSelectTask}
-              selectedTaskId={selectedTaskId}
-            />
-          )}
+          {mode === "week" &&
+            (android ? (
+              <div className="calendar-week-viewport" ref={weekViewportRef}>
+                <div
+                  className="calendar-week-board"
+                  style={
+                    weekBoardBox.width > 0
+                      ? {
+                          width: weekBoardBox.height,
+                          height: weekBoardBox.width,
+                        }
+                      : undefined
+                  }
+                >
+                  <WeekGrid
+                    anchor={cursor}
+                    today={today}
+                    selectedDay={selectedDay}
+                    sessions={visibleSessions}
+                    taskMap={taskMap}
+                    categoryMap={categoryMap}
+                    weekdays={weekdays}
+                    weekStartsOn={weekStartsOn}
+                    onSelectDay={(day) => selectDay(day)}
+                    onSelectTask={onSelectTask}
+                    selectedTaskId={selectedTaskId}
+                    onFocusBlockTap={toggleWeekDetail}
+                  />
+                </div>
+              </div>
+            ) : (
+              <WeekGrid
+                anchor={cursor}
+                today={today}
+                selectedDay={selectedDay}
+                sessions={visibleSessions}
+                taskMap={taskMap}
+                categoryMap={categoryMap}
+                weekdays={weekdays}
+                weekStartsOn={weekStartsOn}
+                onSelectDay={(day) => selectDay(day)}
+                onSelectTask={onSelectTask}
+                selectedTaskId={selectedTaskId}
+              />
+            ))}
         </div>
 
         {mode !== "week" && (
@@ -421,6 +518,19 @@ export function CalendarView({
         </aside>
         )}
       </div>
+
+      {weekDetail && android && (
+        <CalendarWeekFocusCard
+          detail={weekDetail}
+          taskMap={taskMap}
+          category={
+            weekDetail.task.category_id
+              ? categoryMap.get(weekDetail.task.category_id) ?? null
+              : null
+          }
+          onDismiss={() => setWeekDetail(null)}
+        />
+      )}
     </div>
   );
 }
@@ -866,6 +976,7 @@ function WeekGrid({
   onSelectDay,
   onSelectTask,
   selectedTaskId,
+  onFocusBlockTap,
 }: {
   anchor: Date;
   today: Date;
@@ -878,6 +989,7 @@ function WeekGrid({
   onSelectDay: (day: Date) => void;
   onSelectTask: (id: string | null) => void;
   selectedTaskId: string | null;
+  onFocusBlockTap?: (detail: WeekFocusDetail) => void;
 }) {
   const { t } = useI18n();
   const days = useMemo(
@@ -957,6 +1069,13 @@ function WeekGrid({
                     event.stopPropagation();
                     onSelectDay(day);
                     onSelectTask(task.id);
+                    onFocusBlockTap?.({
+                      task,
+                      session,
+                      day,
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
                   }}
                 />
               );
@@ -1046,6 +1165,105 @@ function DayTaskSection({
         })}
       </ul>
     </>
+  );
+}
+
+function calendarWeekFocusPosition(
+  x: number,
+  y: number,
+  layoutWidth: number,
+  layoutHeight: number,
+): { left: number; top: number } {
+  const margin = 8;
+  const visualWidth = layoutHeight;
+  const visualHeight = layoutWidth;
+  const visualLeft = Math.min(
+    Math.max(margin, x + 12),
+    Math.max(margin, window.innerWidth - visualWidth - margin),
+  );
+  const visualTop = Math.min(
+    Math.max(margin, y + 12),
+    Math.max(margin, window.innerHeight - visualHeight - margin),
+  );
+  return { left: visualLeft + layoutHeight, top: visualTop };
+}
+
+function CalendarWeekFocusCard({
+  detail,
+  taskMap,
+  category,
+  onDismiss,
+}: {
+  detail: WeekFocusDetail;
+  taskMap: Map<string, Task>;
+  category: Category | null;
+  onDismiss: () => void;
+}) {
+  const { locale, t } = useI18n();
+  const cardRef = useRef<HTMLDivElement>(null);
+  useDismissOnAndroidBack(true, onDismiss, cardRef);
+  const [size, setSize] = useState({ width: 240, height: 140 });
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    setSize((prev) =>
+      prev.width === width && prev.height === height ? prev : { width, height },
+    );
+  });
+  const { left, top } = calendarWeekFocusPosition(
+    detail.x,
+    detail.y,
+    size.width,
+    size.height,
+  );
+  const { task, session, day } = detail;
+  const priority =
+    task.priority === "high"
+      ? t("common.priorityHighShort")
+      : task.priority === "medium"
+        ? t("common.priorityMediumShort")
+        : t("common.priorityLowShort");
+  return (
+    <div
+      ref={cardRef}
+      className="calendar-week-focus-card is-rotated"
+      style={{ left, top }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <strong>{formatTaskLineage(task, taskMap)}</strong>
+      <p>{formatDayPanelTitle(day, locale)}</p>
+      <p>
+        {t("calendar.focusedMark")}{" "}
+        {formatTimeHm(session.started_at)}–{formatTimeHm(session.ended_at)}
+      </p>
+      <p>
+        {task.status === "done" ? t("common.done") : t("common.notDone")}
+        {` · ${t("calendar.priority", { level: priority })}`}
+        {category ? ` · ${category.name}` : ""}
+      </p>
+      <p>
+        {t("gantt.clocks", {
+          done: formatPomodoroAmount(task.completed_pomodoros ?? 0),
+          estimate: task.estimate_pomodoros ?? 0,
+        })}
+      </p>
+      {(task.start_at != null || task.due_at != null) && (
+        <p>
+          {task.start_at
+            ? t("gantt.starts", {
+                date: formatShortDate(task.start_at, locale),
+              })
+            : ""}
+          {task.start_at && task.due_at ? " · " : ""}
+          {task.due_at
+            ? t("gantt.due", { date: formatShortDate(task.due_at, locale) })
+            : ""}
+        </p>
+      )}
+    </div>
   );
 }
 

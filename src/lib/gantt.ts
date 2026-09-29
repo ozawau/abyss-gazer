@@ -382,13 +382,54 @@ function doneRank(status: Task["status"]): number {
   return status === "done" ? 1 : 0;
 }
 
+function lastCompletedFocusMs(
+  taskId: string,
+  lastFocusEnds: ReadonlyMap<string, number>,
+): number | null {
+  const value = lastFocusEnds.get(taskId);
+  return value == null ? null : value;
+}
+
+function completionOrderMs(task: Task): number {
+  return task.completed_at ?? task.updated_at ?? task.created_at;
+}
+
+/** Subtask lane order under one parent row. */
+export function sortGanttSubtasks(
+  items: Task[],
+  lastFocusEnds: ReadonlyMap<string, number> = new Map(),
+): Task[] {
+  return [...items].sort((a, b) => {
+    const doneDiff = doneRank(a.status) - doneRank(b.status);
+    if (doneDiff !== 0) return doneDiff;
+
+    if (a.status !== "done") {
+      const focusA = lastCompletedFocusMs(a.id, lastFocusEnds);
+      const focusB = lastCompletedFocusMs(b.id, lastFocusEnds);
+      const hasA = focusA != null ? 1 : 0;
+      const hasB = focusB != null ? 1 : 0;
+      if (hasA !== hasB) return hasB - hasA;
+      if (focusA != null && focusB != null && focusA !== focusB) {
+        return focusB - focusA;
+      }
+      if (a.updated_at !== b.updated_at) return b.updated_at - a.updated_at;
+      return a.sort_order - b.sort_order || a.created_at - b.created_at;
+    }
+
+    const completedDiff = completionOrderMs(a) - completionOrderMs(b);
+    if (completedDiff !== 0) return completedDiff;
+    return a.sort_order - b.sort_order || a.created_at - b.created_at;
+  });
+}
+
 export function sortGanttParentRows(
   rows: GanttParentRow[],
   sessions: PomodoroSession[] = [],
+  lastFocusEnds: ReadonlyMap<string, number> = new Map(),
 ): GanttParentRow[] {
   const ordered = rows.map((row) => ({
     ...row,
-    items: [...row.items].sort((a, b) => doneRank(a.status) - doneRank(b.status)),
+    items: sortGanttSubtasks(row.items, lastFocusEnds),
   }));
   return ordered.sort((a, b) => {
     const rank = doneRank(a.parent.status) - doneRank(b.parent.status);

@@ -177,6 +177,37 @@ pub struct FirstFocusStart {
     pub started_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastFocusEnd {
+    pub task_id: String,
+    pub ended_at: i64,
+}
+
+#[tauri::command]
+pub fn list_last_completed_focus_ends(
+    db: State<'_, DbState>,
+) -> Result<Vec<LastFocusEnd>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT task_id, MAX(ended_at)
+             FROM pomodoro_sessions
+             WHERE kind = 'focus'
+               AND completed = 1
+             GROUP BY task_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(LastFocusEnd {
+                task_id: row.get(0)?,
+                ended_at: row.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.map(|row| row.map_err(|e| e.to_string())).collect()
+}
+
 #[tauri::command]
 pub fn list_first_completed_focus_starts(
     db: State<'_, DbState>,

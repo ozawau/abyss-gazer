@@ -3610,6 +3610,64 @@ html.is-narrow {
   z-index: 4;
 }
 
+html.is-android .calendar-week-viewport {
+  position: relative;
+  min-height: min(70vh, 640px);
+  overflow: hidden;
+  width: 100%;
+  min-width: 0;
+}
+
+html.is-android .calendar-week-board {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  overflow: auto;
+  touch-action: pan-x pan-y;
+  transform: rotate(90deg);
+  transform-origin: top left;
+}
+
+html.is-android .calendar-week-board .calendar-week-matrix {
+  max-height: none;
+  min-height: 480px;
+  height: 100%;
+}
+
+html.is-android .calendar-week-focus-card {
+  position: fixed;
+  z-index: 50;
+  min-width: 12rem;
+  max-width: min(18rem, calc(100vw - 1rem));
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+  pointer-events: auto;
+  color: var(--text);
+}
+
+html.is-android .calendar-week-focus-card.is-rotated {
+  transform: rotate(90deg);
+  transform-origin: top left;
+}
+
+html.is-android .calendar-week-focus-card strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+html.is-android .calendar-week-focus-card p {
+  margin: 0.15rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
 @media (max-width: 960px) {
   .calendar-main {
     overflow-x: auto;

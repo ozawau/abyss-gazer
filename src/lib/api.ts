@@ -237,6 +237,15 @@ export function listFirstCompletedFocusStarts(): Promise<FirstFocusStart[]> {
   return invoke("list_first_completed_focus_starts");
 }
 
+export interface LastFocusEnd {
+  task_id: string;
+  ended_at: number;
+}
+
+export function listLastCompletedFocusEnds(): Promise<LastFocusEnd[]> {
+  return invoke("list_last_completed_focus_ends");
+}
+
 export function listPomodoroSessionsInRange(
   startMs: number,
   endMs: number,

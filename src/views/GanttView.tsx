@@ -10,6 +10,7 @@ import {
   Category,
   listCategories,
   listFirstCompletedFocusStarts,
+  listLastCompletedFocusEnds,
   listPomodoroSessionsInRange,
   PomodoroSession,
   Task,
@@ -97,6 +98,9 @@ export function GanttView({
   const [firstFocusStarts, setFirstFocusStarts] = useState<
     Map<string, number>
   >(new Map());
+  const [lastFocusEnds, setLastFocusEnds] = useState<Map<string, number>>(
+    new Map(),
+  );
   const [error, setError] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -228,13 +232,18 @@ export function GanttView({
 
   useEffect(() => {
     let cancelled = false;
-    listFirstCompletedFocusStarts()
-      .then((rows) => {
-        if (!cancelled) {
-          setFirstFocusStarts(
-            new Map(rows.map((row) => [row.task_id, row.started_at])),
-          );
-        }
+    Promise.all([
+      listFirstCompletedFocusStarts(),
+      listLastCompletedFocusEnds(),
+    ])
+      .then(([firstRows, lastRows]) => {
+        if (cancelled) return;
+        setFirstFocusStarts(
+          new Map(firstRows.map((row) => [row.task_id, row.started_at])),
+        );
+        setLastFocusEnds(
+          new Map(lastRows.map((row) => [row.task_id, row.ended_at])),
+        );
       })
       .catch((err) => {
         if (!cancelled) setError(String(err));
@@ -309,7 +318,7 @@ export function GanttView({
         }
         return true;
       });
-    return sortGanttParentRows(rows, sessions);
+    return sortGanttParentRows(rows, sessions, lastFocusEnds);
   }, [
     tasks,
     hideDone,
@@ -320,6 +329,7 @@ export function GanttView({
     range,
     sessionTaskIds,
     sessions,
+    lastFocusEnds,
   ]);
 
   const todayLeft = useMemo(

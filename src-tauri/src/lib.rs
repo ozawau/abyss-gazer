@@ -65,6 +65,7 @@ pub fn run() {
             commands::pomodoro::count_focus_sessions_total_since,
             commands::pomodoro::list_focus_counts_since,
             commands::pomodoro::list_first_completed_focus_starts,
+            commands::pomodoro::list_last_completed_focus_ends,
             commands::pomodoro::list_pomodoro_sessions_in_range,
             commands::settings::get_pomodoro_settings,
             commands::settings::set_pomodoro_settings,
