@@ -139,7 +139,8 @@ export function SettingsDialog({
   const rootRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   const narrow = useNarrowViewport();
-  const iconNav = isAndroidDevice() && narrow;
+  const android = isAndroidDevice();
+  const iconNav = android && narrow;
   useDismissOnAndroidBack(open, () => {
     if (!busy) onClose();
   }, rootRef);
@@ -622,6 +623,37 @@ export function SettingsDialog({
                     }
                   />
                 </div>
+
+                {android && (
+                  <>
+                    <div className="settings-row">
+                      <span className="settings-row-label">
+                        {t("settings.focusEndVibrate")}
+                      </span>
+                      <ToggleSwitch
+                        label={t("settings.focusEndVibrate")}
+                        checked={settings.focusEndVibrate}
+                        disabled={busy}
+                        onChange={(checked) =>
+                          patchPomodoro({ focusEndVibrate: checked })
+                        }
+                      />
+                    </div>
+                    <div className="settings-row">
+                      <span className="settings-row-label">
+                        {t("settings.breakEndVibrate")}
+                      </span>
+                      <ToggleSwitch
+                        label={t("settings.breakEndVibrate")}
+                        checked={settings.breakEndVibrate}
+                        disabled={busy || breaksOff}
+                        onChange={(checked) =>
+                          patchPomodoro({ breakEndVibrate: checked })
+                        }
+                      />
+                    </div>
+                  </>
+                )}
 
                 <div className="settings-row settings-row-stack">
                   <span className="settings-row-label">{t("settings.focusSound")}</span>

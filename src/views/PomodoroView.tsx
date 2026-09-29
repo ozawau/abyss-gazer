@@ -14,6 +14,7 @@ import {
 import { FullscreenIcon } from "../components/FullscreenIcon";
 import { useI18n } from "../components/LocaleProvider";
 import { playPomodoroEndChime } from "../lib/pomodoroChime";
+import { vibratePomodoroEnd } from "../lib/pomodoroVibrate";
 import { formatTaskLineage, taskById } from "../lib/taskTree";
 import {
   formatPomodoroAmount,
@@ -289,6 +290,10 @@ export function PomodoroView({
           ? settingsRef.current.breakEndSound
           : settingsRef.current.focusEndSound,
       );
+      const vibrate = endedBreak
+        ? settingsRef.current.breakEndVibrate
+        : settingsRef.current.focusEndVibrate;
+      if (vibrate) vibratePomodoroEnd();
     }
     await persistSession(completed);
     startedAtRef.current = null;

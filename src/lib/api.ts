@@ -271,6 +271,8 @@ export interface PomodoroSettings {
   autoStartBreak: boolean;
   focusEndSound: string | null;
   breakEndSound: string | null;
+  focusEndVibrate: boolean;
+  breakEndVibrate: boolean;
 }
 
 export const DEFAULT_POMODORO_SETTINGS: PomodoroSettings = {
@@ -284,6 +286,8 @@ export const DEFAULT_POMODORO_SETTINGS: PomodoroSettings = {
   autoStartBreak: false,
   focusEndSound: null,
   breakEndSound: null,
+  focusEndVibrate: false,
+  breakEndVibrate: false,
 };
 
 export function readSoundFile(path: string): Promise<number[]> {

@@ -22,6 +22,10 @@ pub struct PomodoroSettings {
     pub focus_end_sound: Option<String>,
     #[serde(default)]
     pub break_end_sound: Option<String>,
+    #[serde(default)]
+    pub focus_end_vibrate: bool,
+    #[serde(default)]
+    pub break_end_vibrate: bool,
 }
 
 impl Default for PomodoroSettings {
@@ -37,6 +41,8 @@ impl Default for PomodoroSettings {
             auto_start_break: false,
             focus_end_sound: None,
             break_end_sound: None,
+            focus_end_vibrate: false,
+            break_end_vibrate: false,
         }
     }
 }
@@ -77,6 +83,8 @@ fn normalize(settings: PomodoroSettings) -> PomodoroSettings {
         auto_start_break: settings.auto_start_break,
         focus_end_sound: normalize_sound_path(settings.focus_end_sound),
         break_end_sound: normalize_sound_path(settings.break_end_sound),
+        focus_end_vibrate: settings.focus_end_vibrate,
+        break_end_vibrate: settings.break_end_vibrate,
     }
 }
 
