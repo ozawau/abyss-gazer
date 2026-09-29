@@ -7,8 +7,13 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
+import { FullscreenIcon } from "../components/FullscreenIcon";
 import { useI18n } from "../components/LocaleProvider";
-import { useDismissOnAndroidBack } from "../lib/androidBack";
+import {
+  ANDROID_BACK_EVENT,
+  useDismissOnAndroidBack,
+} from "../lib/androidBack";
 import {
   Category,
   listCategories,
@@ -99,7 +104,9 @@ export function CalendarView({
   const today = useMemo(() => startOfLocalDay(new Date()), []);
   const android = isAndroidDevice();
   const narrow = useNarrowViewport();
+  const androidWeekRotated = android && narrow;
   const [weekBoardBox, setWeekBoardBox] = useState({ width: 0, height: 0 });
+  const [weekBoardFullscreen, setWeekBoardFullscreen] = useState(false);
   const [weekDetail, setWeekDetail] = useState<WeekFocusDetail | null>(null);
   const [mode, setMode] = useState<CalendarMode>("month");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
@@ -116,17 +123,41 @@ export function CalendarView({
   }, [narrow, mode]);
 
   useEffect(() => {
-    if (mode !== "week") setWeekDetail(null);
+    if (mode !== "week") {
+      setWeekDetail(null);
+      setWeekBoardFullscreen(false);
+    }
   }, [mode]);
 
+  useEffect(() => {
+    if (!androidWeekRotated) {
+      setWeekBoardFullscreen(false);
+    }
+  }, [androidWeekRotated]);
+
+  useEffect(() => {
+    if (!androidWeekRotated) return;
+    function onBack(event: Event) {
+      if (!weekBoardFullscreen) return;
+      const slot = weekViewportRef.current?.closest(".view-slot");
+      if (slot?.classList.contains("is-hidden")) return;
+      event.preventDefault();
+      setWeekBoardFullscreen(false);
+    }
+    window.addEventListener(ANDROID_BACK_EVENT, onBack);
+    return () => window.removeEventListener(ANDROID_BACK_EVENT, onBack);
+  }, [androidWeekRotated, weekBoardFullscreen]);
+
   useLayoutEffect(() => {
-    if (!android || mode !== "week") return;
+    if (!androidWeekRotated || mode !== "week") return;
     const viewport = weekViewportRef.current;
     if (!viewport) return;
     const measure = () => {
       const next = {
         width: viewport.clientWidth,
-        height: viewport.clientHeight,
+        height: weekBoardFullscreen
+          ? window.innerHeight
+          : viewport.clientHeight,
       };
       setWeekBoardBox((prev) =>
         prev.width === next.width && prev.height === next.height ? prev : next,
@@ -135,8 +166,23 @@ export function CalendarView({
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [android, mode]);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [androidWeekRotated, mode, weekBoardFullscreen]);
+
+  useEffect(() => {
+    if (!androidWeekRotated) return;
+    document.documentElement.classList.toggle(
+      "calendar-week-fullscreen-active",
+      weekBoardFullscreen && mode === "week",
+    );
+    return () => {
+      document.documentElement.classList.remove("calendar-week-fullscreen-active");
+    };
+  }, [androidWeekRotated, weekBoardFullscreen, mode]);
 
   const toggleWeekDetail = useCallback((detail: WeekFocusDetail) => {
     setWeekDetail((prev) =>
@@ -144,8 +190,12 @@ export function CalendarView({
     );
   }, []);
 
+  const handleWeekBlockHover = useCallback((detail: WeekFocusDetail | null) => {
+    setWeekDetail(detail);
+  }, []);
+
   useEffect(() => {
-    if (!android || !weekDetail) return;
+    if (!androidWeekRotated || !weekDetail) return;
     function onPointerDown(event: PointerEvent) {
       const target = event.target;
       if (!(target instanceof Element)) return;
@@ -158,7 +208,7 @@ export function CalendarView({
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [android, weekDetail]);
+  }, [androidWeekRotated, weekDetail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -292,6 +342,77 @@ export function CalendarView({
 
   const weekdays = weekdayShortLabels(weekStartsOn, locale);
 
+  const weekFocusCard =
+    mode === "week" && weekDetail ? (
+      <CalendarWeekFocusCard
+        detail={weekDetail}
+        taskMap={taskMap}
+        category={
+          weekDetail.task.category_id
+            ? categoryMap.get(weekDetail.task.category_id) ?? null
+            : null
+        }
+        rotated={androidWeekRotated}
+        pinned={androidWeekRotated}
+        onDismiss={() => setWeekDetail(null)}
+      />
+    ) : null;
+
+  const androidWeekBoardStyle =
+    weekBoardBox.width > 0
+      ? (() => {
+          const spanW = weekBoardBox.width;
+          const spanH = weekBoardBox.height;
+          const hourHeaderPx = 36;
+          const dayRow = Math.max(20, Math.floor((spanW - hourHeaderPx) / 7));
+          return {
+            width: spanH,
+            height: spanW,
+            ["--calendar-week-day-row" as string]: `${dayRow}px`,
+            ["--calendar-week-span-width" as string]: `${spanW}px`,
+          };
+        })()
+      : undefined;
+
+  function renderAndroidWeekViewport(fullscreen: boolean) {
+    return (
+      <div
+        className={`calendar-week-viewport${fullscreen ? " is-fullscreen" : ""}`}
+        ref={weekViewportRef}
+      >
+        <div className="calendar-week-board" style={androidWeekBoardStyle}>
+          <WeekGrid
+            anchor={cursor}
+            today={today}
+            selectedDay={selectedDay}
+            sessions={visibleSessions}
+            taskMap={taskMap}
+            categoryMap={categoryMap}
+            weekdays={weekdays}
+            weekStartsOn={weekStartsOn}
+            onSelectDay={(day) => selectDay(day)}
+            onSelectTask={onSelectTask}
+            selectedTaskId={selectedTaskId}
+            onFocusBlockTap={toggleWeekDetail}
+            androidLayout
+          />
+        </div>
+        {fullscreen && (
+          <button
+            type="button"
+            className="secondary-btn gantt-fullscreen-exit calendar-week-fullscreen-exit"
+            onClick={() => setWeekBoardFullscreen(false)}
+            title={t("gantt.exitFullscreen")}
+            aria-label={t("gantt.exitFullscreen")}
+          >
+            <FullscreenIcon exit />
+          </button>
+        )}
+        {fullscreen && weekFocusCard}
+      </div>
+    );
+  }
+
   return (
     <div className="view calendar-view" ref={viewRef}>
       <header className="view-header calendar-header">
@@ -333,6 +454,17 @@ export function CalendarView({
               {t("common.next")}
             </button>
           </div>
+          {androidWeekRotated && mode === "week" && (
+            <button
+              type="button"
+              className="secondary-btn gantt-fullscreen-btn"
+              onClick={() => setWeekBoardFullscreen(true)}
+              title={t("gantt.fullscreen")}
+              aria-label={t("gantt.fullscreen")}
+            >
+              <FullscreenIcon />
+            </button>
+          )}
         </div>
       </header>
 
@@ -413,35 +545,15 @@ export function CalendarView({
             />
           )}
           {mode === "week" &&
-            (android ? (
-              <div className="calendar-week-viewport" ref={weekViewportRef}>
-                <div
-                  className="calendar-week-board"
-                  style={
-                    weekBoardBox.width > 0
-                      ? {
-                          width: weekBoardBox.height,
-                          height: weekBoardBox.width,
-                        }
-                      : undefined
-                  }
-                >
-                  <WeekGrid
-                    anchor={cursor}
-                    today={today}
-                    selectedDay={selectedDay}
-                    sessions={visibleSessions}
-                    taskMap={taskMap}
-                    categoryMap={categoryMap}
-                    weekdays={weekdays}
-                    weekStartsOn={weekStartsOn}
-                    onSelectDay={(day) => selectDay(day)}
-                    onSelectTask={onSelectTask}
-                    selectedTaskId={selectedTaskId}
-                    onFocusBlockTap={toggleWeekDetail}
-                  />
-                </div>
-              </div>
+            (androidWeekRotated ? (
+              weekBoardFullscreen ? (
+                createPortal(
+                  renderAndroidWeekViewport(true),
+                  document.body,
+                )
+              ) : (
+                renderAndroidWeekViewport(false)
+              )
             ) : (
               <WeekGrid
                 anchor={cursor}
@@ -455,6 +567,7 @@ export function CalendarView({
                 onSelectDay={(day) => selectDay(day)}
                 onSelectTask={onSelectTask}
                 selectedTaskId={selectedTaskId}
+                onFocusBlockHover={handleWeekBlockHover}
               />
             ))}
         </div>
@@ -519,18 +632,9 @@ export function CalendarView({
         )}
       </div>
 
-      {weekDetail && android && (
-        <CalendarWeekFocusCard
-          detail={weekDetail}
-          taskMap={taskMap}
-          category={
-            weekDetail.task.category_id
-              ? categoryMap.get(weekDetail.task.category_id) ?? null
-              : null
-          }
-          onDismiss={() => setWeekDetail(null)}
-        />
-      )}
+      {weekFocusCard &&
+        !(androidWeekRotated && weekBoardFullscreen) &&
+        weekFocusCard}
     </div>
   );
 }
@@ -977,6 +1081,8 @@ function WeekGrid({
   onSelectTask,
   selectedTaskId,
   onFocusBlockTap,
+  onFocusBlockHover,
+  androidLayout,
 }: {
   anchor: Date;
   today: Date;
@@ -990,6 +1096,8 @@ function WeekGrid({
   onSelectTask: (id: string | null) => void;
   selectedTaskId: string | null;
   onFocusBlockTap?: (detail: WeekFocusDetail) => void;
+  onFocusBlockHover?: (detail: WeekFocusDetail | null) => void;
+  androidLayout?: boolean;
 }) {
   const { t } = useI18n();
   const days = useMemo(
@@ -998,24 +1106,37 @@ function WeekGrid({
   );
 
   return (
-    <div className="calendar-week-matrix" aria-label={t("calendar.weekView")}>
+    <div
+      className={`calendar-week-matrix${
+        androidLayout ? " is-android-rotated" : ""
+      }`}
+      aria-label={t("calendar.weekView")}
+      onMouseLeave={
+        onFocusBlockHover
+          ? (event) => {
+              const next = event.relatedTarget;
+              if (
+                next instanceof Element &&
+                next.closest(".calendar-week-color-block, .calendar-week-focus-card")
+              ) {
+                return;
+              }
+              onFocusBlockHover(null);
+            }
+          : undefined
+      }
+    >
       <div className="calendar-week-matrix-corner" aria-hidden />
       <div className="calendar-week-matrix-hours" aria-hidden>
-        {Array.from({ length: 12 }, (_, i) => {
-          const hour = i * 2;
-          return (
-            <span key={hour} className="calendar-week-matrix-hour-cell">
+        {Array.from({ length: 24 }, (_, hour) => (
+          <span key={hour} className="calendar-week-matrix-hour-cell">
+            {hour % 2 === 0 && (
               <span className="calendar-week-matrix-hour-tick">
                 {String(hour).padStart(2, "0")}:00
               </span>
-              {hour === 22 && (
-                <span className="calendar-week-matrix-hour-tick is-end">
-                  24:00
-                </span>
-              )}
-            </span>
-          );
-        })}
+            )}
+          </span>
+        ))}
       </div>
       {days.map((day, index) => (
         <Fragment key={dayKey(day)}>
@@ -1047,6 +1168,7 @@ function WeekGrid({
               const leftPct = (clipped.startMin / MINUTES_PER_DAY) * 100;
               const widthPct =
                 ((clipped.endMin - clipped.startMin) / MINUTES_PER_DAY) * 100;
+              const minWidthPct = androidLayout ? 1.2 : 0.35;
               const color = categoryColor(task.category_id, categoryMap);
               const tip = `${formatTimeHm(session.started_at)}–${formatTimeHm(
                 session.ended_at,
@@ -1060,7 +1182,7 @@ function WeekGrid({
                   }`}
                   style={{
                     left: `${leftPct}%`,
-                    width: `${Math.max(widthPct, 0.35)}%`,
+                    width: `${Math.max(widthPct, minWidthPct)}%`,
                     backgroundColor: color,
                   }}
                   title={tip}
@@ -1077,6 +1199,47 @@ function WeekGrid({
                       y: event.clientY,
                     });
                   }}
+                  onMouseEnter={
+                    onFocusBlockHover
+                      ? (event) => {
+                          onFocusBlockHover({
+                            task,
+                            session,
+                            day,
+                            x: event.clientX,
+                            y: event.clientY,
+                          });
+                        }
+                      : undefined
+                  }
+                  onMouseMove={
+                    onFocusBlockHover
+                      ? (event) => {
+                          onFocusBlockHover({
+                            task,
+                            session,
+                            day,
+                            x: event.clientX,
+                            y: event.clientY,
+                          });
+                        }
+                      : undefined
+                  }
+                  onMouseLeave={
+                    onFocusBlockHover
+                      ? (event) => {
+                          const next = event.relatedTarget;
+                          if (
+                            next instanceof Element &&
+                            (next.closest(".calendar-week-color-block") ||
+                              next.closest(".calendar-week-focus-card"))
+                          ) {
+                            return;
+                          }
+                          onFocusBlockHover(null);
+                        }
+                      : undefined
+                  }
                 />
               );
             })}
@@ -1168,7 +1331,24 @@ function DayTaskSection({
   );
 }
 
-function calendarWeekFocusPosition(
+function calendarWeekFocusPositionUpright(
+  x: number,
+  y: number,
+): { left: number; top: number } {
+  const margin = 8;
+  return {
+    left: Math.min(
+      x + 14,
+      Math.max(margin, window.innerWidth - 280 - margin),
+    ),
+    top: Math.min(
+      y + 16,
+      Math.max(margin, window.innerHeight - 180 - margin),
+    ),
+  };
+}
+
+function calendarWeekFocusPositionRotated(
   x: number,
   y: number,
   layoutWidth: number,
@@ -1192,16 +1372,20 @@ function CalendarWeekFocusCard({
   detail,
   taskMap,
   category,
+  rotated,
+  pinned,
   onDismiss,
 }: {
   detail: WeekFocusDetail;
   taskMap: Map<string, Task>;
   category: Category | null;
+  rotated: boolean;
+  pinned: boolean;
   onDismiss: () => void;
 }) {
   const { locale, t } = useI18n();
   const cardRef = useRef<HTMLDivElement>(null);
-  useDismissOnAndroidBack(true, onDismiss, cardRef);
+  useDismissOnAndroidBack(pinned, onDismiss, cardRef);
   const [size, setSize] = useState({ width: 240, height: 140 });
   useLayoutEffect(() => {
     const el = cardRef.current;
@@ -1212,12 +1396,14 @@ function CalendarWeekFocusCard({
       prev.width === width && prev.height === height ? prev : { width, height },
     );
   });
-  const { left, top } = calendarWeekFocusPosition(
-    detail.x,
-    detail.y,
-    size.width,
-    size.height,
-  );
+  const { left, top } = rotated
+    ? calendarWeekFocusPositionRotated(
+        detail.x,
+        detail.y,
+        size.width,
+        size.height,
+      )
+    : calendarWeekFocusPositionUpright(detail.x, detail.y);
   const { task, session, day } = detail;
   const priority =
     task.priority === "high"
@@ -1228,10 +1414,9 @@ function CalendarWeekFocusCard({
   return (
     <div
       ref={cardRef}
-      className="calendar-week-focus-card is-rotated"
+      className={`calendar-week-focus-card${rotated ? " is-rotated" : ""}`}
       style={{ left, top }}
-      role="dialog"
-      aria-modal="true"
+      role="tooltip"
     >
       <strong>{formatTaskLineage(task, taskMap)}</strong>
       <p>{formatDayPanelTitle(day, locale)}</p>

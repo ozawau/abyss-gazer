@@ -50,6 +50,7 @@ import {
   type GanttRange,
   type GanttScale,
 } from "../lib/gantt";
+import { formatTaskLineage, taskById } from "../lib/taskTree";
 
 interface GanttViewProps {
   tasks: Task[];
@@ -172,6 +173,8 @@ export function GanttView({
     for (const c of categories) map.set(c.id, c);
     return map;
   }, [categories]);
+
+  const tasksById = useMemo(() => taskById(tasks), [tasks]);
 
   useEffect(() => {
     if (!desktopNarrow) return;
@@ -627,7 +630,7 @@ export function GanttView({
       {hover && (
         <GanttTaskHover
           task={hover.task}
-          parent={hover.parent}
+          tasksById={tasksById}
           x={hover.x}
           y={hover.y}
           rotated={android}
@@ -978,7 +981,7 @@ function GanttParentRowView({
 
 function GanttTaskHover({
   task,
-  parent,
+  tasksById,
   x,
   y,
   rotated,
@@ -987,7 +990,7 @@ function GanttTaskHover({
   category,
 }: {
   task: Task;
-  parent: Task;
+  tasksById: Map<string, Task>;
   x: number;
   y: number;
   rotated: boolean;
@@ -1026,8 +1029,7 @@ function GanttTaskHover({
       style={{ left, top }}
       role="tooltip"
     >
-      <strong>{task.title}</strong>
-      {task.id !== parent.id && <p>{t("gantt.parent", { title: parent.title })}</p>}
+      <strong>{formatTaskLineage(task, tasksById)}</strong>
       <p>
         {task.status === "done" ? t("common.done") : t("common.notDone")}
         {` · ${t("calendar.priority", { level: priority })}`}

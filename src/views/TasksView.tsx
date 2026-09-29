@@ -46,6 +46,10 @@ import {
   splitDurationMinutes,
 } from "../lib/dateDisplay";
 import { isTaskStarted } from "../lib/taskSchedule";
+import {
+  categoryIdFromFilter,
+  type CategoryFilter,
+} from "../lib/categoryFilter";
 import { isAndroidDevice } from "../lib/viewport";
 import {
   applyAncestorFields,
@@ -83,7 +87,7 @@ function StatDuration({ totalMinutes }: { totalMinutes: number }) {
   );
 }
 
-export type CategoryFilter = "all" | "none" | string;
+export type { CategoryFilter } from "../lib/categoryFilter";
 
 interface TasksViewProps {
   tasks: Task[];
@@ -296,7 +300,9 @@ export function TasksView({
   const { locale, t } = useI18n();
   const android = isAndroidDevice();
   const [draft, setDraft] = useState("");
-  const [draftCategoryId, setDraftCategoryId] = useState<string | null>(null);
+  const [draftCategoryId, setDraftCategoryId] = useState<string | null>(() =>
+    categoryIdFromFilter(categoryFilter),
+  );
   const [draftEstimate, setDraftEstimate] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -408,6 +414,10 @@ export function TasksView({
       onCategoryFilterChange("all");
     }
   }, [showUncategorizedFilter, categoryFilter, onCategoryFilterChange]);
+
+  useEffect(() => {
+    setDraftCategoryId(categoryIdFromFilter(categoryFilter));
+  }, [categoryFilter]);
 
   const filteredTasks = useMemo(() => {
     const byCategory =
@@ -589,7 +599,8 @@ export function TasksView({
     try {
       const task = await createTask({
         title,
-        category_id: draftCategoryId,
+        category_id:
+          draftCategoryId ?? categoryIdFromFilter(categoryFilter),
         estimate_pomodoros: draftEstimate,
       });
       onTasksChange([task, ...tasks]);
@@ -796,7 +807,9 @@ export function TasksView({
         t.category_id === id ? { ...t, category_id: null } : t,
       ),
     );
-    if (draftCategoryId === id) setDraftCategoryId(null);
+    if (draftCategoryId === id) {
+      setDraftCategoryId(categoryIdFromFilter(categoryFilter));
+    }
     if (categoryFilter === id) onCategoryFilterChange("all");
   }
 
