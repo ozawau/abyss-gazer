@@ -89,6 +89,13 @@ export function updateTask(input: {
   return invoke("update_task", { input: payload });
 }
 
+export function reparentTask(input: {
+  id: string;
+  parent_id: string;
+}): Promise<Task[]> {
+  return invoke("reparent_task", { input });
+}
+
 export function reorderTask(input: {
   id: string;
   priority: TaskPriority;

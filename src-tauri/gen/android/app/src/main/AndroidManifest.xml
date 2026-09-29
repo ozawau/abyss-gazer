@@ -24,6 +24,7 @@
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:launchMode="singleTask"
+            android:taskAffinity="com.abyssgazer.desktop.main"
             android:label="@string/main_activity_title"
             android:name=".MainActivity"
             android:resizeableActivity="true"
@@ -89,7 +90,11 @@
 
         <activity
             android:name=".NoteTaskInputActivity"
+            android:excludeFromRecents="true"
             android:exported="false"
-            android:theme="@style/Theme.NoteTaskInputDialog" />
+            android:launchMode="singleTop"
+            android:noHistory="true"
+            android:taskAffinity="com.abyssgazer.desktop.widget"
+            android:theme="@style/Theme.NoteTaskWidgetOverlay" />
     </application>
 </manifest>

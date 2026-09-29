@@ -10,6 +10,7 @@ interface TaskRowMenuProps {
   y: number;
   onEdit: () => void;
   onCreateSubtask: () => void;
+  onAttachAsSubtask?: () => void;
   onDelete: () => void;
   onClose: () => void;
   priorityMenu?: {
@@ -91,6 +92,7 @@ export function TaskRowMenu({
   y,
   onEdit,
   onCreateSubtask,
+  onAttachAsSubtask,
   onDelete,
   onClose,
   priorityMenu,
@@ -143,6 +145,11 @@ export function TaskRowMenu({
       <button type="button" role="menuitem" onClick={onCreateSubtask}>
         {t("detail.createSubtask")}
       </button>
+      {onAttachAsSubtask && (
+        <button type="button" role="menuitem" onClick={onAttachAsSubtask}>
+          {t("tasks.attachAsSubtask")}
+        </button>
+      )}
       {priorityMenu && (
         <MenuBranch
           label={t("tasks.menuPriority")}

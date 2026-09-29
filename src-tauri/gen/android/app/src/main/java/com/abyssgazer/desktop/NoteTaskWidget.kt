@@ -38,7 +38,6 @@ class NoteTaskWidgetProvider : AppWidgetProvider() {
                 if (outcome.clearedDraft) {
                     updateAll(context)
                 }
-                MainActivity.notifyCheckinChanged()
             }
             else -> super.onReceive(context, intent)
         }
@@ -47,7 +46,6 @@ class NoteTaskWidgetProvider : AppWidgetProvider() {
     companion object {
         private const val ACTION_REFRESH = "com.abyssgazer.desktop.action.NOTE_TASK_WIDGET_REFRESH"
         private const val ACTION_ADD = "com.abyssgazer.desktop.action.NOTE_TASK_WIDGET_ADD"
-
         @JvmStatic
         fun refresh(context: Context) {
             updateAll(context)
@@ -83,7 +81,7 @@ class NoteTaskWidgetProvider : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(
                 R.id.note_task_input,
-                inputIntent(context),
+                inputActivityIntent(context),
             )
             views.setOnClickPendingIntent(
                 R.id.note_task_add,
@@ -92,9 +90,11 @@ class NoteTaskWidgetProvider : AppWidgetProvider() {
             return views
         }
 
-        private fun inputIntent(context: Context): PendingIntent {
+        private fun inputActivityIntent(context: Context): PendingIntent {
             val intent = Intent(context, NoteTaskInputActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_NO_HISTORY or
+                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
             }
             return PendingIntent.getActivity(
                 context,
@@ -126,7 +126,6 @@ data class AddTaskOutcome(
 object NoteTaskActions {
     private const val PREFS = "note_task_widget"
     private const val KEY_DRAFT = "draft"
-
     fun readDraft(context: Context): String {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_DRAFT, "")

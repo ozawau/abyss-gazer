@@ -16,6 +16,7 @@ import {
   TaskPomodoroClocks,
 } from "../components/ClockEstimate";
 import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
+import { ReparentTaskDialog } from "../components/ReparentTaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
 import { TaskRowMenu, type TaskMoveAction } from "../components/TaskRowMenu";
 import { useI18n } from "../components/LocaleProvider";
@@ -29,6 +30,7 @@ import {
   deleteTask,
   listCategories,
   listFocusCountsSince,
+  reparentTask,
   reorderTask,
   startOfLocalDayMs,
   Task,
@@ -318,6 +320,7 @@ export function TasksView({
     y: number;
   } | null>(null);
   const [subtaskParent, setSubtaskParent] = useState<Task | null>(null);
+  const [attachAsChildTask, setAttachAsChildTask] = useState<Task | null>(null);
   const [pendingDeleteTask, setPendingDeleteTask] = useState<Task | null>(null);
   const deleteDialogRef = useRef<HTMLDivElement>(null);
   useDismissOnAndroidBack(pendingDeleteTask != null, () => {
@@ -699,6 +702,35 @@ export function TasksView({
     }
   }
 
+  async function handleAttachAsSubtask(parentId: string) {
+    if (!attachAsChildTask || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const rows = await reparentTask({
+        id: attachAsChildTask.id,
+        parent_id: parentId,
+      });
+      onTasksChange(rows);
+      setAttachAsChildTask(null);
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        const byId = taskById(rows);
+        next.add(parentId);
+        let current = byId.get(parentId);
+        while (current?.parent_id) {
+          next.add(current.parent_id);
+          current = byId.get(current.parent_id);
+        }
+        return next;
+      });
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleCreateSubtask(parent: Task, title: string) {
     const task = await createTask({
       title,
@@ -894,9 +926,14 @@ export function TasksView({
   }
 
   function openSelectedTaskCard(id: string, row: HTMLElement) {
+    if (hoverTaskId === id) {
+      setHoverTaskId(null);
+      hoverAnchor.current = null;
+      return;
+    }
     const anchor = row.getBoundingClientRect();
     hoverAnchor.current = anchor;
-    setHoverTaskId((prev) => (prev === id ? prev : id));
+    setHoverTaskId(id);
     placeAnchoredTaskCard(hoverCardRef.current, anchor);
   }
 
@@ -1146,6 +1183,7 @@ export function TasksView({
       if (!(target instanceof Element)) return;
       if (target.closest(".task-hover-card, .task-row")) return;
       setHoverTaskId(null);
+      hoverAnchor.current = null;
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
@@ -1377,6 +1415,15 @@ export function TasksView({
         }}
       />
 
+      <ReparentTaskDialog
+        open={!!attachAsChildTask}
+        task={attachAsChildTask}
+        tasks={tasks}
+        categories={categories}
+        onClose={() => !busy && setAttachAsChildTask(null)}
+        onPick={handleAttachAsSubtask}
+      />
+
       {rowMenu && (
         <TaskRowMenu
           key={`${rowMenu.task.id}:${rowMenu.x}:${rowMenu.y}`}
@@ -1389,6 +1436,10 @@ export function TasksView({
           }}
           onCreateSubtask={() => {
             setSubtaskParent(rowMenu.task);
+            setRowMenu(null);
+          }}
+          onAttachAsSubtask={() => {
+            setAttachAsChildTask(rowMenu.task);
             setRowMenu(null);
           }}
           onDelete={() => {

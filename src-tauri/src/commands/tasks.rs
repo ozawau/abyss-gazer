@@ -52,6 +52,12 @@ pub struct UpdateTaskInput {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ReparentTaskInput {
+    pub id: String,
+    pub parent_id: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ReorderTaskInput {
     pub id: String,
     pub priority: String,
@@ -453,6 +459,59 @@ pub fn update_task(
     }
 
     fetch_task(&conn, &input.id)
+}
+
+#[tauri::command]
+pub fn reparent_task(
+    db: State<'_, DbState>,
+    input: ReparentTaskInput,
+) -> Result<Vec<Task>, String> {
+    if input.id == input.parent_id {
+        return Err("不能将任务设为自己的子任务".into());
+    }
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    fetch_task(&conn, &input.id)?;
+    let parent = fetch_task(&conn, &input.parent_id)?;
+    let descendants = collect_descendant_ids(&conn, &input.id)?;
+    if descendants.iter().any(|id| id == &input.parent_id) {
+        return Err("不能移动到自身下级任务下".into());
+    }
+    let sort_order = next_sort_order_end(&conn, &input.parent_id)?;
+    let priority = parent.priority.clone();
+    let category_id = parent.category_id.clone();
+    let updated_at = now_ms();
+    conn.execute(
+        "UPDATE tasks SET parent_id = ?1, priority = ?2, category_id = ?3, sort_order = ?4, updated_at = ?5
+         WHERE id = ?6",
+        rusqlite::params![
+            input.parent_id,
+            priority,
+            category_id,
+            sort_order,
+            updated_at,
+            input.id
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    cascade_field(
+        &conn,
+        &input.id,
+        "UPDATE tasks SET priority = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::types::Value::Text(priority),
+        updated_at,
+    )?;
+    let category_value = match &category_id {
+        Some(id) => rusqlite::types::Value::Text(id.clone()),
+        None => rusqlite::types::Value::Null,
+    };
+    cascade_field(
+        &conn,
+        &input.id,
+        "UPDATE tasks SET category_id = ?1, updated_at = ?2 WHERE id = ?3",
+        category_value,
+        updated_at,
+    )?;
+    list_tasks_ordered(&conn)
 }
 
 #[tauri::command]

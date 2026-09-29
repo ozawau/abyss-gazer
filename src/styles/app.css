@@ -3991,6 +3991,10 @@ html.is-android .gantt-hover-card.is-rotated {
   transform-origin: top left;
 }
 
+html.is-android .gantt-hover-card.is-pinned {
+  pointer-events: auto;
+}
+
 .gantt-today-line {
   position: absolute;
   top: 0;
@@ -4110,6 +4114,119 @@ html.is-android .gantt-hover-card.is-rotated {
   gap: 0.3rem;
   color: var(--text);
   font-size: 0.88rem;
+}
+
+.reparent-task-dialog {
+  max-width: min(420px, 92vw);
+}
+
+.reparent-task-source,
+.reparent-task-hint,
+.reparent-task-empty {
+  margin: 0 0 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.reparent-task-confirm-body {
+  margin: 0 0 0.5rem;
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.reparent-task-confirm .reparent-task-hint {
+  margin-bottom: 1rem;
+}
+
+.reparent-task-filter {
+  margin-bottom: 0.75rem;
+}
+
+.reparent-task-tree {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0.25rem 0;
+  max-height: min(50vh, 320px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+
+.reparent-task-item {
+  border-bottom: 1px solid var(--border);
+}
+
+.reparent-task-item:last-child {
+  border-bottom: none;
+}
+
+.reparent-task-line {
+  display: flex;
+  align-items: stretch;
+  gap: 0.15rem;
+  min-height: 2.35rem;
+}
+
+.reparent-task-toggle,
+.reparent-task-toggle-spacer {
+  flex: 0 0 1.65rem;
+  width: 1.65rem;
+}
+
+.reparent-task-toggle {
+  margin: 0.35rem 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reparent-task-toggle:hover,
+.reparent-task-toggle:focus-visible {
+  background: var(--surface-muted, rgba(37, 99, 235, 0.08));
+  color: var(--text);
+}
+
+.reparent-task-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  margin: 0.2rem 0.35rem 0.2rem 0;
+  padding: 0.45rem 0.55rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+}
+
+.reparent-task-dot {
+  width: 0.62rem;
+  height: 0.62rem;
+}
+
+.reparent-task-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+
+.reparent-task-row:hover,
+.reparent-task-row:focus-visible {
+  background: var(--surface-muted, rgba(37, 99, 235, 0.08));
 }
 
 .habit-checkin-tree {

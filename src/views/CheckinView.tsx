@@ -29,8 +29,6 @@ import {
 import { useCnHolidayRevision } from "../lib/cnHolidayData";
 import { statutoryDayInfo } from "../lib/cnStatutoryDay";
 import { formatLunarDayShort } from "../lib/dateDisplay";
-import { requestPinCheckinWidget } from "../lib/api";
-import { isAndroidDevice } from "../lib/viewport";
 import { descendantIds } from "../lib/taskTree";
 import {
   categoryNameById,
@@ -184,7 +182,6 @@ export function CheckinView({
   dataEpoch,
 }: CheckinViewProps) {
   const { locale, t } = useI18n();
-  const android = isAndroidDevice();
   useCnHolidayRevision();
   const today = useMemo(() => startOfLocalDay(new Date()), []);
   const [mode, setMode] = useState<CheckinMode>("week");
@@ -459,17 +456,6 @@ export function CheckinView({
     setEditor({ habit: task, day });
   }
 
-  async function addHomeWidget() {
-    if (!android) return;
-    setError(null);
-    try {
-      const started = await requestPinCheckinWidget();
-      if (!started) setError(t("checkin.addWidgetUnsupported"));
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
   async function saveCheckin(input: {
     checked: boolean;
     note: string;
@@ -544,16 +530,6 @@ export function CheckinView({
             ))}
           </div>
           <div className="calendar-nav">
-            {android && (
-              <button
-                type="button"
-                className="secondary-btn"
-                title={t("checkin.addWidgetHint")}
-                onClick={() => void addHomeWidget()}
-              >
-                {t("checkin.addWidget")}
-              </button>
-            )}
             <button
               type="button"
               className="secondary-btn"

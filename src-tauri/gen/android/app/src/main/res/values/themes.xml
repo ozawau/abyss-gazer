@@ -4,8 +4,11 @@
         <!-- Customize your theme here. -->
     </style>
 
-    <style name="Theme.NoteTaskInputDialog" parent="Theme.MaterialComponents.DayNight.Dialog.MinWidth">
-        <item name="android:windowIsFloating">true</item>
+    <style name="Theme.NoteTaskWidgetOverlay" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
         <item name="android:windowSoftInputMode">stateVisible|adjustResize</item>
     </style>
 </resources>

@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Category,
   listCategories,
@@ -115,6 +122,33 @@ export function GanttView({
     x: number;
     y: number;
   } | null>(null);
+
+  const toggleAndroidHover = useCallback(
+    (task: Task, parent: Task, x: number, y: number) => {
+      setHover((prev) =>
+        prev?.task.id === task.id ? null : { task, parent, x, y },
+      );
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!android || !hover) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (
+        target.closest(
+          ".gantt-hover-card, .gantt-name, .gantt-bar, .gantt-mark, .gantt-week-title",
+        )
+      ) {
+        return;
+      }
+      setHover(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [android, hover]);
   useEffect(() => {
     let cancelled = false;
     listCategories()
@@ -489,6 +523,7 @@ export function GanttView({
               row={row}
               onSelectTask={onSelectTask}
               onStartPomodoro={onStartPomodoro}
+              onAndroidTapHover={android ? toggleAndroidHover : undefined}
             />
           ))}
         </ul>
@@ -548,7 +583,8 @@ export function GanttView({
                   todayLeft={todayLeft}
                   onSelectTask={onSelectTask}
                   onStartPomodoro={onStartPomodoro}
-                  onHover={setHover}
+                  onHover={android ? undefined : setHover}
+                  onAndroidTapHover={android ? toggleAndroidHover : undefined}
                 />
               ))}
               {visibleRows.length === 0 && (
@@ -585,6 +621,7 @@ export function GanttView({
           x={hover.x}
           y={hover.y}
           rotated={android}
+          pinned={android}
           onDismiss={() => setHover(null)}
           category={
             hover.task.category_id
@@ -601,10 +638,12 @@ function GanttWeekGroup({
   row,
   onSelectTask,
   onStartPomodoro,
+  onAndroidTapHover,
 }: {
   row: GanttParentRow;
   onSelectTask: (id: string | null) => void;
   onStartPomodoro: (taskId: string) => void;
+  onAndroidTapHover?: (task: Task, parent: Task, x: number, y: number) => void;
 }) {
   const { locale, t } = useI18n();
   return (
@@ -617,7 +656,10 @@ function GanttWeekGroup({
           <button
             type="button"
             className={`gantt-week-title${task.status === "done" ? " is-done" : ""}`}
-            onClick={() => onSelectTask(task.id)}
+            onClick={(e) => {
+              onSelectTask(task.id);
+              onAndroidTapHover?.(task, row.parent, e.clientX, e.clientY);
+            }}
           >
             <span>{task.title}</span>
             <em>{taskSpanLabel(task, locale)}</em>
@@ -703,6 +745,7 @@ function GanttParentRowView({
   onSelectTask,
   onStartPomodoro,
   onHover,
+  onAndroidTapHover,
 }: {
   row: GanttParentRow;
   activityMode: GanttActivityMode;
@@ -715,9 +758,10 @@ function GanttParentRowView({
   todayLeft: number | null;
   onSelectTask: (id: string | null) => void;
   onStartPomodoro: (taskId: string) => void;
-  onHover: (
+  onHover?: (
     next: { task: Task; parent: Task; x: number; y: number } | null,
   ) => void;
+  onAndroidTapHover?: (task: Task, parent: Task, x: number, y: number) => void;
 }) {
   const { t } = useI18n();
   const { parent, items } = row;
@@ -749,7 +793,7 @@ function GanttParentRowView({
     <div
       className={`gantt-row${stacked ? " is-stacked" : ""}`}
       style={{ minHeight: `${laneCount * 2.15}rem` }}
-      onMouseLeave={() => onHover(null)}
+      onMouseLeave={() => onHover?.(null)}
     >
       <div
         className={`gantt-name-cell${
@@ -762,13 +806,16 @@ function GanttParentRowView({
         <button
           type="button"
           className={`gantt-name${parent.status === "done" ? " is-done" : ""}`}
-          onClick={() => onSelectTask(parent.id)}
+          onClick={(e) => {
+            onSelectTask(parent.id);
+            onAndroidTapHover?.(parent, parent, e.clientX, e.clientY);
+          }}
           title={parent.title}
           onMouseEnter={(e) =>
-            onHover({ task: parent, parent, x: e.clientX, y: e.clientY })
+            onHover?.({ task: parent, parent, x: e.clientX, y: e.clientY })
           }
           onMouseMove={(e) =>
-            onHover({ task: parent, parent, x: e.clientX, y: e.clientY })
+            onHover?.({ task: parent, parent, x: e.clientX, y: e.clientY })
           }
         >
           <span
@@ -836,9 +883,15 @@ function GanttParentRowView({
                   onClick={(e) => {
                     e.stopPropagation();
                     onSelectTask(lane.task.id);
+                    onAndroidTapHover?.(
+                      lane.task,
+                      parent,
+                      e.clientX,
+                      e.clientY,
+                    );
                   }}
                   onMouseEnter={(e) => {
-                    onHover({
+                    onHover?.({
                       task: lane.task,
                       parent,
                       x: e.clientX,
@@ -846,7 +899,7 @@ function GanttParentRowView({
                     });
                   }}
                   onMouseMove={(e) => {
-                    onHover({
+                    onHover?.({
                       task: lane.task,
                       parent,
                       x: e.clientX,
@@ -875,9 +928,15 @@ function GanttParentRowView({
                   onClick={(e) => {
                     e.stopPropagation();
                     onSelectTask(lane.task.id);
+                    onAndroidTapHover?.(
+                      lane.task,
+                      parent,
+                      e.clientX,
+                      e.clientY,
+                    );
                   }}
                   onMouseEnter={(e) => {
-                    onHover({
+                    onHover?.({
                       task: lane.task,
                       parent,
                       x: e.clientX,
@@ -885,7 +944,7 @@ function GanttParentRowView({
                     });
                   }}
                   onMouseMove={(e) => {
-                    onHover({
+                    onHover?.({
                       task: lane.task,
                       parent,
                       x: e.clientX,
@@ -913,6 +972,7 @@ function GanttTaskHover({
   x,
   y,
   rotated,
+  pinned,
   onDismiss,
   category,
 }: {
@@ -921,6 +981,7 @@ function GanttTaskHover({
   x: number;
   y: number;
   rotated: boolean;
+  pinned: boolean;
   onDismiss: () => void;
   category: Category | null;
 }) {
@@ -949,7 +1010,9 @@ function GanttTaskHover({
   return (
     <div
       ref={cardRef}
-      className={`gantt-hover-card${rotated ? " is-rotated" : ""}`}
+      className={`gantt-hover-card${rotated ? " is-rotated" : ""}${
+        pinned ? " is-pinned" : ""
+      }`}
       style={{ left, top }}
       role="tooltip"
     >
