@@ -96,6 +96,7 @@
             android:launchMode="singleTop"
             android:noHistory="true"
             android:taskAffinity="com.abyssgazer.desktop.widget"
-            android:theme="@style/Theme.NoteTaskWidgetOverlay" />
+            android:theme="@style/Theme.NoteTaskWidgetOverlay"
+            android:windowSoftInputMode="stateVisible|adjustNothing" />
     </application>
 </manifest>

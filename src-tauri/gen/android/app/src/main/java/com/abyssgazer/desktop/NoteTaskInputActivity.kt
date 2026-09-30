@@ -2,13 +2,19 @@ package com.abyssgazer.desktop
 
 import android.app.Activity
 import android.os.Bundle
+import android.text.InputType
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.doAfterTextChanged
+import kotlin.math.max
 
 /** Bottom overlay for widget draft input (fallback when launcher has no widget RemoteInput). */
 class NoteTaskInputActivity : Activity() {
@@ -17,14 +23,35 @@ class NoteTaskInputActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.note_task_overlay)
-        findViewById<View>(R.id.note_task_overlay_root).setOnClickListener { finishQuietly() }
-        findViewById<View>(R.id.note_task_overlay_bar).setOnClickListener { /* keep keyboard */ }
+        val root = findViewById<View>(R.id.note_task_overlay_root)
+        val bar = findViewById<View>(R.id.note_task_overlay_bar)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val system = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            val bottom = max(system.bottom, ime.bottom)
+            (bar.layoutParams as FrameLayout.LayoutParams).apply {
+                bottomMargin = bottom
+                bar.layoutParams = this
+            }
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
+        root.setOnClickListener { finishQuietly() }
+        bar.setOnClickListener { /* keep keyboard */ }
         input = findViewById(R.id.note_task_dialog_input)
-        input.setText(NoteTaskActions.readDraft(this))
-        input.setSelection(input.text.length)
+        input.apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setHorizontallyScrolling(true)
+            isSingleLine = true
+            setText(NoteTaskActions.readDraft(this@NoteTaskInputActivity))
+            setSelection(text.length)
+        }
         input.doAfterTextChanged { text ->
-            NoteTaskActions.saveDraft(this, text?.toString().orEmpty())
+            // Refreshing the home-screen widget on every key redraws the launcher layer and
+            // can steal focus / clip the field; sync draft locally and update the card on exit.
+            NoteTaskActions.saveDraft(this, text?.toString().orEmpty(), refreshWidget = false)
         }
         findViewById<TextView>(R.id.note_task_dialog_add).setOnClickListener {
             submit()
@@ -64,7 +91,7 @@ class NoteTaskInputActivity : Activity() {
 
     override fun onPause() {
         if (!skipDraftOnPause) {
-            NoteTaskActions.saveDraft(this, input.text.toString())
+            NoteTaskActions.saveDraft(this, input.text.toString(), refreshWidget = true)
         }
         super.onPause()
     }

@@ -75,10 +75,13 @@ class NoteTaskWidgetProvider : AppWidgetProvider() {
 
         private fun buildViews(context: Context, draft: String, hint: String): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.note_task_widget)
-            views.setTextViewText(
-                R.id.note_task_input,
-                if (draft.isEmpty()) hint else draft,
-            )
+            if (draft.isEmpty()) {
+                views.setTextViewText(R.id.note_task_input, hint)
+                views.setTextColor(R.id.note_task_input, 0xFF8A97A8.toInt())
+            } else {
+                views.setTextViewText(R.id.note_task_input, draft)
+                views.setTextColor(R.id.note_task_input, 0xFF152033.toInt())
+            }
             views.setOnClickPendingIntent(
                 R.id.note_task_input,
                 inputActivityIntent(context),
@@ -129,16 +132,17 @@ object NoteTaskActions {
     fun readDraft(context: Context): String {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_DRAFT, "")
-            ?.trim()
             .orEmpty()
     }
 
-    fun saveDraft(context: Context, text: String) {
+    fun saveDraft(context: Context, text: String, refreshWidget: Boolean = true) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_DRAFT, text)
             .apply()
-        NoteTaskWidgetProvider.updateAll(context)
+        if (refreshWidget) {
+            NoteTaskWidgetProvider.updateAll(context)
+        }
     }
 
     fun clearDraft(context: Context) {

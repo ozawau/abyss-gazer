@@ -20,15 +20,19 @@
         <EditText
             android:id="@+id/note_task_dialog_input"
             android:layout_width="0dp"
-            android:layout_height="36dp"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
             android:background="@drawable/note_task_input_bg"
+            android:ellipsize="none"
             android:hint="@string/note_task_widget_hint"
             android:imeOptions="actionDone"
             android:inputType="textCapSentences"
             android:maxLines="1"
+            android:minHeight="36dp"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
+            android:scrollHorizontally="true"
+            android:singleLine="true"
             android:textColor="#152033"
             android:textSize="13sp" />
 

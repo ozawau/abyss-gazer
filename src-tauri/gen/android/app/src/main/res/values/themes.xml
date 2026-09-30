@@ -9,6 +9,6 @@
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:backgroundDimEnabled">false</item>
-        <item name="android:windowSoftInputMode">stateVisible|adjustResize</item>
+        <item name="android:windowSoftInputMode">stateVisible|adjustNothing</item>
     </style>
 </resources>
