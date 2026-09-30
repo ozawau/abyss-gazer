@@ -40,3 +40,7 @@ SQLite 与应用安装包分离，放在用户数据目录（重打包 / 覆盖�
 - Linux：`~/.local/share/abyss-gazer/abyss.db`
 
 首次启动会自动尝试从旧的 bundle-id 路径迁移数据库。
+
+## Git 数据同步（逻辑同步 v1）
+
+启用 Git 同步时，不再把整个 `abyss.db` 提交进仓库（避免二进制合并冲突）。流程为：`git pull` → 将 `sync/` 合并进本地库 → 从本地库 export 到 `sync/` → 仅提交 `sync/` 与 `.gitignore`。删除通过 tombstone + `deleted: true` 的 JSON 传播。若远程仍是旧格式（只有 `abyss.db`），第一次同步会把当前库内容导出为 `sync/` 并完成迁移，不丢历史。手机端请用 **ozawa-synchronizor** 安卓应用对 Gazer 数据目录 pull/push。

@@ -1,4 +1,8 @@
 use crate::db::{open_db, DbState};
+use crate::sync_logical::{
+    ensure_data_gitignore, export_logical, import_logical, untrack_database_from_git,
+};
+use rusqlite::Connection;
 use crate::system_config::{
     db_file_in, ensure_category_id, migrate_legacy_task_category_ids, normalize_system_settings,
     read_system_settings, resolve_active_data_dir, resolve_config_dir, write_system_settings,
@@ -84,23 +88,69 @@ fn sync_local(db_path: &Path, backup_dir: &str) -> Result<(), String> {
     copy_db_file(db_path, &dest)
 }
 
-fn sync_git(data_dir: &Path, message: &str) -> Result<(), String> {
-    ensure_git_repo(data_dir)?;
-    run_git(data_dir, &["pull", "--rebase", "--autostash"]).map_err(|e| {
-        if e.to_lowercase().contains("conflict") || e.contains("CONFLICT") {
-            format!("git 同步冲突，已停止同步。{e}")
-        } else if e.contains("Could not resolve")
-            || e.contains("unable to access")
-            || e.contains("Failed to connect")
-            || e.contains("Network is unreachable")
-        {
-            format!("无法连接远程仓库，已停止同步。{e}")
-        } else {
-            e
-        }
-    })?;
+const DB_PRESERVE_DIR: &str = ".abyss-db-preserve";
+const DB_SIDECAR: [&str; 3] = ["abyss.db-wal", "abyss.db-shm", "abyss.db-journal"];
 
-    run_git(data_dir, &["add", "-A"])?;
+fn preserve_local_db(data_dir: &Path, db_path: &Path) -> Result<(), String> {
+    if !db_path.is_file() {
+        return Ok(());
+    }
+    let stash = data_dir.join(DB_PRESERVE_DIR);
+    fs::create_dir_all(&stash).map_err(|e| e.to_string())?;
+    fs::copy(db_path, stash.join("abyss.db")).map_err(|e| e.to_string())?;
+    for name in DB_SIDECAR {
+        let side = data_dir.join(name);
+        if side.is_file() {
+            fs::copy(&side, stash.join(name)).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn restore_local_db(data_dir: &Path, db_path: &Path) -> Result<(), String> {
+    let stash = data_dir.join(DB_PRESERVE_DIR);
+    let backup = stash.join("abyss.db");
+    if backup.is_file()
+        && (!db_path.is_file()
+            || fs::metadata(&backup)
+                .map(|m| m.len())
+                .unwrap_or(0)
+                >= fs::metadata(db_path).map(|m| m.len()).unwrap_or(0))
+    {
+        if let Some(parent) = db_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::copy(&backup, db_path).map_err(|e| e.to_string())?;
+    }
+    for name in DB_SIDECAR {
+        let backup_side = stash.join(name);
+        if backup_side.is_file() {
+            fs::copy(&backup_side, data_dir.join(name)).map_err(|e| e.to_string())?;
+        }
+    }
+    let _ = fs::remove_dir_all(&stash);
+    Ok(())
+}
+
+fn git_pull(data_dir: &Path, db_path: &Path) -> Result<(), String> {
+    ensure_git_repo(data_dir)?;
+    preserve_local_db(data_dir, db_path)?;
+    let branch = run_git(data_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?
+        .trim()
+        .to_string();
+    if branch.is_empty() || branch == "HEAD" {
+        return Err("无法识别当前 git 分支".into());
+    }
+    run_git(data_dir, &["fetch", "origin"]).map_err(map_git_pull_err)?;
+    let pull = run_git(data_dir, &["reset", "--hard", &format!("origin/{branch}")])
+        .map(|_| ())
+        .map_err(map_git_pull_err);
+    restore_local_db(data_dir, db_path)?;
+    pull
+}
+
+fn git_push_logical(data_dir: &Path, message: &str) -> Result<(), String> {
+    run_git(data_dir, &["add", "sync", ".gitignore"])?;
     let status = run_git(data_dir, &["status", "--porcelain"])?;
     if !status.is_empty() {
         match run_git(data_dir, &["commit", "-m", message]) {
@@ -109,23 +159,48 @@ fn sync_git(data_dir: &Path, message: &str) -> Result<(), String> {
             Err(e) => return Err(e),
         }
     }
+    run_git(data_dir, &["push"])
+        .map(|_| ())
+        .map_err(map_git_push_err)
+}
 
-    run_git(data_dir, &["push"]).map_err(|e| {
-        if e.to_lowercase().contains("conflict")
-            || e.contains("non-fast-forward")
-            || e.contains("rejected")
-        {
-            format!("git 推送冲突，已停止同步。{e}")
-        } else if e.contains("Could not resolve")
-            || e.contains("unable to access")
-            || e.contains("Failed to connect")
-            || e.contains("Network is unreachable")
-        {
-            format!("无法连接远程仓库，已停止同步。{e}")
-        } else {
-            e
-        }
-    })?;
+fn map_git_pull_err(e: String) -> String {
+    if e.to_lowercase().contains("conflict") || e.contains("CONFLICT") {
+        format!("git 同步冲突，已停止同步。{e}")
+    } else if e.contains("Could not resolve")
+        || e.contains("unable to access")
+        || e.contains("Failed to connect")
+        || e.contains("Network is unreachable")
+    {
+        format!("无法连接远程仓库，已停止同步。{e}")
+    } else {
+        e
+    }
+}
+
+fn map_git_push_err(e: String) -> String {
+    if e.to_lowercase().contains("conflict")
+        || e.contains("non-fast-forward")
+        || e.contains("rejected")
+    {
+        format!("git 推送冲突，已停止同步。{e}")
+    } else if e.contains("Could not resolve")
+        || e.contains("unable to access")
+        || e.contains("Failed to connect")
+        || e.contains("Network is unreachable")
+    {
+        format!("无法连接远程仓库，已停止同步。{e}")
+    } else {
+        e
+    }
+}
+
+fn merge_and_export_logical(conn: &mut Connection, data_dir: &Path, db_path: &Path) -> Result<(), String> {
+    *conn = open_db(db_path).map_err(|e| format!("拉取后打开数据库失败: {e}"))?;
+    import_logical(conn, data_dir)?;
+    export_logical(conn, data_dir)?;
+    ensure_data_gitignore(data_dir)?;
+    untrack_database_from_git(data_dir)?;
     Ok(())
 }
 
@@ -452,26 +527,14 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
                     .parent()
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| db_path.clone());
-                sync_git(&data_dir, &message)
+                git_pull(&data_dir, &db_path)?;
+                {
+                    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+                    merge_and_export_logical(&mut conn, &data_dir, &db_path)?;
+                }
+                git_push_logical(&data_dir, &message)
             }
         };
-        // `git pull` replaces abyss.db. Reopen after the pull so later writes
-        // do not hit a stale connection. The lock is not held during the pull,
-        // or the main-thread commands beachball until git finishes.
-        if matches!(method, SyncMethod::Git) {
-            let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-            match open_db(&db_path) {
-                Ok(fresh) => *conn = fresh,
-                Err(e) => {
-                    return Err(match sync_result {
-                        Ok(()) => format!("同步后重新打开数据库失败: {e}"),
-                        Err(sync_err) => {
-                            format!("{sync_err}；同步后重新打开数据库失败: {e}")
-                        }
-                    });
-                }
-            }
-        }
         sync_result
     })
     .await

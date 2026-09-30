@@ -117,6 +117,8 @@ pub fn toggle_habit_checkin(
             rusqlite::params![task_id, day],
         )
         .map_err(|e| e.to_string())?;
+        let tid = crate::sync_logical::checkin_tombstone_id(&task_id, &day);
+        crate::sync_logical::record_tombstone(&conn, "habit_checkin", &tid)?;
         return Ok(false);
     }
     conn.execute(
@@ -219,6 +221,8 @@ pub fn save_habit_checkin(
         )
         .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
+        let tid = crate::sync_logical::checkin_tombstone_id(&input.task_id, &input.day);
+        crate::sync_logical::record_tombstone(&conn, "habit_checkin", &tid)?;
         return Ok(());
     }
 

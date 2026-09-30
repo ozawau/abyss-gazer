@@ -21,7 +21,8 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
             id TEXT PRIMARY KEY NOT NULL,
             name TEXT NOT NULL,
             color TEXT NOT NULL,
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS tasks (
@@ -240,6 +241,31 @@ fn migrate_schema(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_habit_checkin_items_day
             ON habit_checkin_items(day);",
     )?;
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sync_tombstones (
+            kind TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (kind, entity_id)
+        );",
+    )?;
+
+    let mut stmt = conn.prepare("PRAGMA table_info(categories)")?;
+    let cat_cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !cat_cols.iter().any(|c| c == "updated_at") {
+        conn.execute(
+            "ALTER TABLE categories ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        conn.execute(
+            "UPDATE categories SET updated_at = created_at WHERE updated_at = 0",
+            [],
+        )?;
+    }
 
     Ok(())
 }

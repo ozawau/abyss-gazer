@@ -89,12 +89,13 @@ pub fn create_category(
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO categories (id, name, color, created_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO categories (id, name, color, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
         rusqlite::params![
             category.id,
             category.name,
             category.color,
-            category.created_at
+            category.created_at,
+            category.created_at,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -131,9 +132,10 @@ pub fn update_category(
         return Err("Invalid color".into());
     }
 
+    let updated_at = now_ms();
     conn.execute(
-        "UPDATE categories SET name = ?1, color = ?2 WHERE id = ?3",
-        rusqlite::params![name, color, input.id],
+        "UPDATE categories SET name = ?1, color = ?2, updated_at = ?3 WHERE id = ?4",
+        rusqlite::params![name, color, updated_at, input.id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -156,5 +158,6 @@ pub fn delete_category(db: State<'_, DbState>, id: String) -> Result<(), String>
     if changed == 0 {
         return Err("Category not found".into());
     }
+    crate::sync_logical::record_tombstone(&conn, "category", &id)?;
     Ok(())
 }

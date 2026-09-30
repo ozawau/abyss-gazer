@@ -641,6 +641,7 @@ pub fn delete_task(db: State<'_, DbState>, id: String) -> Result<(), String> {
     for task_id in ids.into_iter().rev() {
         conn.execute("DELETE FROM tasks WHERE id = ?1", [&task_id])
             .map_err(|e| e.to_string())?;
+        crate::sync_logical::record_tombstone(&conn, "task", &task_id)?;
     }
     Ok(())
 }

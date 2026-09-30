@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod sync_logical;
 mod system_config;
 mod widget;
 
