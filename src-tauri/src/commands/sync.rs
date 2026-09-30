@@ -204,12 +204,6 @@ fn merge_and_export_logical(conn: &mut Connection, data_dir: &Path, db_path: &Pa
     Ok(())
 }
 
-fn disable_sync(app: &AppHandle) -> Result<(), String> {
-    let mut settings = read_system_settings(app)?;
-    settings.sync_enabled = false;
-    write_system_settings(app, &settings)
-}
-
 /// Register or remove the OS login item.
 /// macOS writes a LaunchAgent plist. Windows writes the current-user Run key,
 /// with the exe path quoted.
@@ -541,7 +535,6 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
     .map_err(|e| format!("同步任务失败: {e}"))?;
 
     if let Err(err) = result {
-        let _ = disable_sync(&app);
         return Err(err);
     }
     crate::widget::request_publish();

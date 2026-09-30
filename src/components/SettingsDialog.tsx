@@ -10,6 +10,7 @@ import {
   getPomodoroSettings,
   getSystemSettings,
   listCategories,
+  persistSoundFile,
   pickDirectory,
   PomodoroSettings,
   setDataDirectory,
@@ -142,7 +143,7 @@ export function SettingsDialog({
   const android = isAndroidDevice();
   const iconNav = android && narrow;
   useDismissOnAndroidBack(open, () => {
-    if (!busy) onClose();
+    void requestClose();
   }, rootRef);
   const weekStartOptions: { value: WeekStartsOn; label: string }[] = [
     { value: 1, label: t("settings.weekday.mon") },
@@ -255,15 +256,43 @@ export function SettingsDialog({
     void persistSystem(next);
   }
 
+  function normalizedPomodoro(state: PomodoroSettings): PomodoroSettings {
+    return {
+      ...state,
+      focusMinutes: clampMinutes(state.focusMinutes, 25),
+      shortBreakMinutes: clampMinutes(state.shortBreakMinutes, 5),
+      longBreakMinutes: clampMinutes(state.longBreakMinutes, 15),
+      longBreakInterval: clampInterval(state.longBreakInterval),
+    };
+  }
+
   function commitNumber(
     key: keyof PomodoroSettings,
     raw: string,
     clamp: (n: number) => number,
   ) {
     const parsed = Number(raw);
-    const value = clamp(parsed);
-    if (settings[key] === value) return;
+    const value = clamp(Number.isFinite(parsed) ? parsed : Number(settings[key]));
     patchPomodoro({ [key]: value } as Partial<PomodoroSettings>);
+  }
+
+  async function requestClose() {
+    if (busy) return;
+    const next = normalizedPomodoro(settings);
+    if (
+      next.focusMinutes !== settings.focusMinutes ||
+      next.shortBreakMinutes !== settings.shortBreakMinutes ||
+      next.longBreakMinutes !== settings.longBreakMinutes ||
+      next.longBreakInterval !== settings.longBreakInterval
+    ) {
+      setSettings(next);
+    }
+    try {
+      await persistPomodoro(next);
+    } catch {
+      return;
+    }
+    onClose();
   }
 
   async function chooseFolder(
@@ -324,7 +353,8 @@ export function SettingsDialog({
       });
       if (selected == null || Array.isArray(selected)) return;
       forgetCachedSound(settings[key]);
-      patchPomodoro({ [key]: selected } as Partial<PomodoroSettings>);
+      const stored = android ? await persistSoundFile(selected) : selected;
+      patchPomodoro({ [key]: stored } as Partial<PomodoroSettings>);
     } catch (err) {
       setError(String(err));
     }
@@ -338,6 +368,7 @@ export function SettingsDialog({
     try {
       await playPomodoroEndChime(kind, path, { fallbackToDefault: false });
     } catch (err) {
+      forgetCachedSound(path);
       setError(String(err));
     }
   }
@@ -401,7 +432,7 @@ export function SettingsDialog({
   const syncOff = !system.syncEnabled;
 
   return (
-    <div ref={rootRef} className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div ref={rootRef} className="modal-backdrop" role="presentation" onClick={() => void requestClose()}>
       <div
         className="modal-card settings-dialog"
         role="dialog"
@@ -414,7 +445,7 @@ export function SettingsDialog({
           <button
             type="button"
             className="ghost-btn"
-            onClick={onClose}
+            onClick={() => void requestClose()}
             disabled={busy}
           >
             {t("common.close")}
@@ -968,6 +999,29 @@ export function SettingsDialog({
                     }
                   />
                 </div>
+
+                {!android && (
+                  <div
+                    className={`settings-row settings-row-stack${syncOff ? " is-disabled" : ""}`}
+                  >
+                    <div className="settings-row">
+                      <span className="settings-row-label">
+                        {t("settings.syncOnDataChange")}
+                      </span>
+                      <ToggleSwitch
+                        label={t("settings.syncOnDataChange")}
+                        checked={system.syncOnDataChange}
+                        disabled={busy || syncOff}
+                        onChange={(checked) =>
+                          patchSystem({ syncOnDataChange: checked })
+                        }
+                      />
+                    </div>
+                    <p className="settings-field-hint">
+                      {t("settings.syncOnDataChangeHint")}
+                    </p>
+                  </div>
+                )}
 
                 <div
                   className={`settings-group${syncOff ? " is-disabled" : ""}`}

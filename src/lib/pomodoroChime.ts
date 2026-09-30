@@ -62,11 +62,30 @@ async function decodeSound(path: string): Promise<AudioBuffer> {
   if (!ctx) {
     throw new Error(translate(resolveLocale(readStoredLanguage()), "audioUnsupported"));
   }
-  const bytes = await readSoundFile(path);
-  const copy = Uint8Array.from(bytes).buffer;
-  const buffer = await ctx.decodeAudioData(copy);
-  soundCache.set(path, buffer);
-  return buffer;
+  let bytes: number[];
+  try {
+    bytes = await readSoundFile(path);
+  } catch (err) {
+    soundCache.delete(path);
+    throw err;
+  }
+  if (!bytes.length) {
+    soundCache.delete(path);
+    throw new Error(
+      translate(resolveLocale(readStoredLanguage()), "soundMissing"),
+    );
+  }
+  const copy = Uint8Array.from(bytes).buffer.slice(0);
+  try {
+    const buffer = await ctx.decodeAudioData(copy);
+    soundCache.set(path, buffer);
+    return buffer;
+  } catch {
+    soundCache.delete(path);
+    throw new Error(
+      translate(resolveLocale(readStoredLanguage()), "soundMissing"),
+    );
+  }
 }
 
 async function playCustomSound(path: string): Promise<void> {

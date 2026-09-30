@@ -16,4 +16,7 @@
     <string name="note_task_widget_preview_hint">输入便签任务…</string>
     <string name="note_task_widget_add">添加</string>
     <string name="note_task_widget_dialog_title">新建便签任务</string>
+    <string name="pomodoro_notification_channel">番茄钟计时</string>
+    <string name="pomodoro_notification_channel_desc">专注或休息计时时在通知栏显示剩余时间</string>
+    <string name="pomodoro_notification_paused">已暂停</string>
 </resources>

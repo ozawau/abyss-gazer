@@ -1,8 +1,9 @@
 use crate::db::DbState;
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_os = "android"))]
 use std::fs;
 use std::path::PathBuf;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 const POMODORO_SETTINGS_KEY: &str = "pomodoro";
 const MAX_SOUND_BYTES: u64 = 5 * 1024 * 1024;
@@ -88,9 +89,19 @@ fn normalize(settings: PomodoroSettings) -> PomodoroSettings {
     }
 }
 
-#[tauri::command]
-pub fn read_sound_file(path: String) -> Result<Vec<u8>, String> {
-    let file = PathBuf::from(path.trim());
+fn validate_sound_extension(path: &str) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.starts_with("content://") || trimmed.starts_with("file://") {
+        return Ok(());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.ends_with(".mp3") || lower.ends_with(".wav") {
+        return Ok(());
+    }
+    if lower.contains(".mp3") || lower.contains(".wav") {
+        return Ok(());
+    }
+    let file = PathBuf::from(path);
     let ext = file
         .extension()
         .and_then(|e| e.to_str())
@@ -99,14 +110,65 @@ pub fn read_sound_file(path: String) -> Result<Vec<u8>, String> {
     if ext != "wav" && ext != "mp3" {
         return Err("仅支持 mp3 或 wav 文件".into());
     }
-    let meta = fs::metadata(&file).map_err(|e| format!("无法读取音频: {e}"))?;
-    if !meta.is_file() {
-        return Err("路径不是文件".into());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_sound_file(app: AppHandle, path: String) -> Result<Vec<u8>, String> {
+    let trimmed = path.trim();
+    validate_sound_extension(trimmed)?;
+    #[cfg(target_os = "android")]
+    {
+        return crate::commands::android_jni::read_sound_bytes(&app, trimmed);
     }
-    if meta.len() > MAX_SOUND_BYTES {
-        return Err("音频文件不能超过 5MB".into());
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+        let file = PathBuf::from(trimmed);
+        let meta = fs::metadata(&file).map_err(|e| format!("无法读取音频: {e}"))?;
+        if !meta.is_file() {
+            return Err("文件不存在".into());
+        }
+        if meta.len() > MAX_SOUND_BYTES {
+            return Err("音频文件不能超过 5MB".into());
+        }
+        fs::read(&file).map_err(|e| format!("无法读取音频: {e}"))
     }
-    fs::read(&file).map_err(|e| format!("无法读取音频: {e}"))
+}
+
+#[tauri::command]
+pub fn persist_sound_file(app: AppHandle, path: String) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("路径为空".into());
+    }
+    validate_sound_extension(trimmed)?;
+    #[cfg(target_os = "android")]
+    {
+        return crate::commands::android_jni::persist_sound_file(&app, trimmed);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+        let file = PathBuf::from(trimmed);
+        if !file.is_file() {
+            return Err("文件不存在".into());
+        }
+        Ok(trimmed.to_string())
+    }
+}
+
+#[tauri::command]
+pub fn pomodoro_vibrate_end(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::commands::android_jni::vibrate_pomodoro_end(&app);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(())
+    }
 }
 
 fn read_pomodoro_settings(conn: &rusqlite::Connection) -> Result<PomodoroSettings, String> {

@@ -55,11 +55,17 @@ export async function syncPomodoroPresence(
   const badge = formatPomodoroClock(resolved.remaining);
 
   try {
+    const timerActive =
+      resolved.status === "running" || resolved.status === "paused";
     await invoke("set_pomodoro_tray", {
       title,
       tooltip,
       windowTitle,
       badge,
+      timerActive,
+      timerPaused: resolved.status === "paused",
+      timerClock: formatPomodoroClock(resolved.remaining),
+      timerFocusPhase: resolved.phase === "focus",
     });
   } catch (err) {
     console.error("pomodoro tray update failed", err);

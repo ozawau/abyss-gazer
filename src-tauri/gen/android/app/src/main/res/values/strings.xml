@@ -17,4 +17,7 @@
     <string name="note_task_widget_preview_hint">Write a note task…</string>
     <string name="note_task_widget_add">Add</string>
     <string name="note_task_widget_dialog_title">New note task</string>
+    <string name="pomodoro_notification_channel">Pomodoro timer</string>
+    <string name="pomodoro_notification_channel_desc">Shows focus and break countdown while timing</string>
+    <string name="pomodoro_notification_paused">Paused</string>
 </resources>

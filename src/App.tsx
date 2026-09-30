@@ -12,7 +12,6 @@ import {
   listTasks,
   PomodoroSettings,
   reopenDatabase,
-  runDataSync,
   setSystemSettings as persistSystemSettings,
   SystemSettings,
   Task,
@@ -22,7 +21,8 @@ import { type GanttActivityMode } from "./lib/gantt";
 import { syncPomodoroPresence } from "./lib/pomodoroPresence";
 import { type PomodoroTick } from "./lib/pomodoroTimer";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
-import { ANDROID_BACK_EVENT, dismissTopAndroidPopup, useDismissOnAndroidBack } from "./lib/androidBack";
+import { ANDROID_BACK_EVENT, dismissTopAndroidPopup } from "./lib/androidBack";
+import { configureDataSync, runSyncCycle } from "./lib/dataSync";
 import { isAndroidDevice, useNarrowViewport } from "./lib/viewport";
 import { formatTaskLineage, taskById } from "./lib/taskTree";
 import type { TasksSubPage } from "./lib/tasksNav";
@@ -126,7 +126,6 @@ function MainApp() {
   const [calendarCategoryFilter, setCalendarCategoryFilter] =
     useState<CategoryFilter>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const syncErrorRef = useRef<HTMLDivElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const systemReady = useRef(false);
   const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings>(
@@ -135,8 +134,6 @@ function MainApp() {
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(
     DEFAULT_SYSTEM_SETTINGS,
   );
-  const [syncError, setSyncError] = useState<string | null>(null);
-  useDismissOnAndroidBack(syncError != null, () => setSyncError(null), syncErrorRef);
   const [dataEpoch, setDataEpoch] = useState(0);
   useEffect(() => {
     const refresh = () => setDataEpoch((n) => n + 1);
@@ -216,64 +213,54 @@ function MainApp() {
     };
   }, []);
 
+  const reloadAfterSync = useCallback(async () => {
+    const gen = ++tasksLoadGen.current;
+    const rows = await listTasks();
+    if (tasksLoadGen.current !== gen) return;
+    setTasks(rows);
+    setDataEpoch((n) => n + 1);
+    try {
+      const pomodoro = await getPomodoroSettings();
+      if (tasksLoadGen.current === gen) {
+        setPomodoroSettings({ ...DEFAULT_POMODORO_SETTINGS, ...pomodoro });
+      }
+    } catch {
+      /* keep the timings already on screen */
+    }
+  }, []);
+
+  const syncToastMessages = useMemo(
+    () => ({
+      success: t("settings.syncToastOk"),
+      failure: (detail: string) => t("settings.syncToastFail", { detail }),
+    }),
+    [t],
+  );
+
   useEffect(() => {
+    configureDataSync({
+      syncEnabled: systemSettings.syncEnabled,
+      syncOnDataChange: systemSettings.syncOnDataChange,
+      messages: syncToastMessages,
+      afterSuccess: reloadAfterSync,
+    });
+
     if (!systemSettings.syncEnabled) return;
 
-    let cancelled = false;
-    let inFlight = false;
-
-    async function tick() {
-      if (cancelled || inFlight) return;
-      inFlight = true;
-      try {
-        await runDataSync();
-      } catch (err) {
-        if (!cancelled) {
-          setSystemSettings((prev) => ({ ...prev, syncEnabled: false }));
-          setSyncError(String(err));
-        }
-        inFlight = false;
-        return;
-      }
-      if (cancelled) {
-        inFlight = false;
-        return;
-      }
-      const gen = ++tasksLoadGen.current;
-      try {
-        const rows = await listTasks();
-        if (cancelled || tasksLoadGen.current !== gen) return;
-        setTasks(rows);
-        setDataEpoch((n) => n + 1);
-        try {
-          const pomodoro = await getPomodoroSettings();
-          if (!cancelled && tasksLoadGen.current === gen) {
-            setPomodoroSettings({ ...DEFAULT_POMODORO_SETTINGS, ...pomodoro });
-          }
-        } catch {
-          /* keep the timings already on screen */
-        }
-      } catch (err) {
-        if (!cancelled && tasksLoadGen.current === gen) setLoadError(String(err));
-      } finally {
-        inFlight = false;
-      }
-    }
-
-    void tick();
+    void runSyncCycle();
     const ms = systemSettings.syncIntervalMinutes * 60_000;
-    const id = window.setInterval(() => void tick(), ms);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
+    const id = window.setInterval(() => void runSyncCycle(), ms);
+    return () => window.clearInterval(id);
   }, [
     systemSettings.syncEnabled,
-    systemSettings.syncMethod,
+    systemSettings.syncOnDataChange,
     systemSettings.syncIntervalMinutes,
+    systemSettings.syncMethod,
     systemSettings.localBackupDir,
     systemSettings.gitCommitMessage,
     systemSettings.dataDir,
+    syncToastMessages,
+    reloadAfterSync,
   ]);
 
   const selectedTask = useMemo(
@@ -593,36 +580,6 @@ function MainApp() {
         onDataPathChange={(path) => void handleDataPathChange(path)}
       />
 
-      {syncError && (
-        <div
-          ref={syncErrorRef}
-          className="modal-backdrop"
-          role="presentation"
-          onClick={() => setSyncError(null)}
-        >
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="sync-error-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="sync-error-title">{t("syncStopped")}</h2>
-            <div className="delete-confirm">
-              <p>{syncError}</p>
-              <div className="delete-confirm-actions">
-                <button
-                  type="button"
-                  className="primary-btn"
-                  onClick={() => setSyncError(null)}
-                >
-                  {t("common.ok")}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

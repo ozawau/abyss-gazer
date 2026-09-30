@@ -235,7 +235,12 @@ pub fn set_pomodoro_tray(
     tooltip: String,
     window_title: String,
     badge: String,
+    timer_active: Option<bool>,
+    timer_paused: Option<bool>,
+    timer_clock: Option<String>,
+    timer_focus_phase: Option<bool>,
 ) -> Result<(), String> {
+    let _ = (timer_active, timer_paused, timer_clock, timer_focus_phase);
     apply_tray(&app, &title, &tooltip)?;
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_title(&window_title);

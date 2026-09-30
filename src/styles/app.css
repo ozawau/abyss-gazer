@@ -4780,3 +4780,42 @@ html.is-narrow {
     display: none;
   }
 }
+
+.sync-result-toast {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 10050;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: 0.65rem 0.9rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  color: var(--text-primary, #f5f5f5);
+  background: var(--surface-elevated, #2a2a2e);
+  border: 1px solid color-mix(in srgb, var(--border-subtle, #555) 80%, transparent);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  opacity: 0;
+  transform: translateY(-0.35rem);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+  pointer-events: none;
+}
+
+.sync-result-toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sync-result-toast.is-ok {
+  border-color: color-mix(in srgb, #3d9a6a 55%, var(--border-subtle, #555));
+}
+
+.sync-result-toast.is-error {
+  border-color: color-mix(in srgb, #c44 55%, var(--border-subtle, #555));
+}
+
+html.is-android .sync-result-toast {
+  display: none;
+}

@@ -178,6 +178,10 @@ const zh = {
     chooseDir: "选择目录",
     chooseDataDir: "选择数据文件目录",
     sync: "开启同步",
+    syncOnDataChange: "数据变更后立即同步",
+    syncOnDataChangeHint: "任务、打卡或番茄记录变更后约 1 秒内自动同步（桌面端）。",
+    syncToastOk: "同步成功",
+    syncToastFail: "同步失败：{detail}",
     syncMethod: "同步方式",
     localDisk: "本地磁盘",
     interval: "同步间隔",
@@ -428,6 +432,7 @@ const zh = {
   },
   syncStopped: "同步已停止",
   audioUnsupported: "当前环境不支持播放音频",
+  soundMissing: "找不到音频文件，请重新选择",
 } as const;
 
 type Catalog<T> = {
@@ -563,6 +568,10 @@ const en: Catalog<typeof zh> = {
     chooseDir: "Choose folder",
     chooseDataDir: "Choose data folder",
     sync: "Sync",
+    syncOnDataChange: "Sync immediately after data changes",
+    syncOnDataChangeHint: "Auto-sync about 1s after task, check-in, or pomodoro changes (desktop).",
+    syncToastOk: "Sync succeeded",
+    syncToastFail: "Sync failed: {detail}",
     syncMethod: "Sync method",
     localDisk: "Local disk",
     interval: "Sync interval",
@@ -813,6 +822,7 @@ const en: Catalog<typeof zh> = {
   },
   syncStopped: "Sync stopped",
   audioUnsupported: "This environment cannot play audio",
+  soundMissing: "Audio file not found. Choose another file.",
 };
 
 type Paths<T, P extends string = ""> = T extends string

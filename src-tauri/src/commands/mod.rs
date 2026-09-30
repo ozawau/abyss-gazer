@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+pub mod android_jni;
 pub mod categories;
 pub mod directory;
 pub mod checkins;

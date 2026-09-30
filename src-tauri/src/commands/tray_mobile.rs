@@ -9,10 +9,28 @@ pub fn set_pomodoro_tray(
     tooltip: String,
     window_title: String,
     badge: String,
+    timer_active: Option<bool>,
+    timer_paused: Option<bool>,
+    timer_clock: Option<String>,
+    timer_focus_phase: Option<bool>,
 ) -> Result<(), String> {
-    let _ = (title, tooltip, badge);
+    let _ = (badge, tooltip);
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_title(&window_title);
+    }
+    #[cfg(target_os = "android")]
+    {
+        let active = timer_active.unwrap_or(false);
+        let paused = timer_paused.unwrap_or(false);
+        let clock = timer_clock.unwrap_or_else(|| title.clone());
+        let focus_phase = timer_focus_phase.unwrap_or(true);
+        crate::commands::android_jni::update_timer_notification(
+            &app, &clock, focus_phase, active, paused,
+        )?;
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (title, timer_active, timer_paused, timer_clock, timer_focus_phase);
     }
     Ok(())
 }

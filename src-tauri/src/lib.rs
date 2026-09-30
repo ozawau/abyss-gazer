@@ -71,6 +71,8 @@ pub fn run() {
             commands::settings::get_pomodoro_settings,
             commands::settings::set_pomodoro_settings,
             commands::settings::read_sound_file,
+            commands::settings::persist_sound_file,
+            commands::settings::pomodoro_vibrate_end,
             commands::sync::get_system_settings,
             commands::sync::set_system_settings,
             commands::sync::get_default_data_dir,

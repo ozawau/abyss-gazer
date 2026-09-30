@@ -1,12 +1,16 @@
 package com.abyssgazer.desktop
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
@@ -28,6 +32,9 @@ class MainActivity : TauriActivity() {
     registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
       DirectoryPicker.onWritePermissionResult(granted)
     }
+
+  private val notificationPermission =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
@@ -105,7 +112,20 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     DirectoryPicker.attach(directoryPicker, storageAccess, writePermission)
+    requestNotificationPermissionIfNeeded()
     applyTopSystemBarInset()
+  }
+
+  private fun requestNotificationPermissionIfNeeded() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    if (ContextCompat.checkSelfPermission(
+        this,
+        Manifest.permission.POST_NOTIFICATIONS,
+      ) == PackageManager.PERMISSION_GRANTED
+    ) {
+      return
+    }
+    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
   }
 
   override fun onResume() {

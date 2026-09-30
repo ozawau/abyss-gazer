@@ -27,6 +27,9 @@ pub struct SystemSettings {
     pub sync_enabled: bool,
     pub sync_method: SyncMethod,
     pub sync_interval_minutes: i64,
+    /// When true, the desktop app syncs soon after local data mutations.
+    #[serde(default)]
+    pub sync_on_data_change: bool,
     pub local_backup_dir: Option<String>,
     pub git_commit_message: String,
     /// Calendar week start: 0=Sunday … 6=Saturday (same as JS `Date.getDay()`).
@@ -70,6 +73,7 @@ impl Default for SystemSettings {
             sync_enabled: false,
             sync_method: SyncMethod::Local,
             sync_interval_minutes: 10,
+            sync_on_data_change: false,
             local_backup_dir: None,
             git_commit_message: "chore: sync Abyss Gazer data".into(),
             week_starts_on: default_week_starts_on(),
@@ -141,6 +145,7 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
         sync_enabled: settings.sync_enabled,
         sync_method: settings.sync_method,
         sync_interval_minutes: normalize_interval(settings.sync_interval_minutes),
+        sync_on_data_change: settings.sync_on_data_change,
         local_backup_dir,
         git_commit_message,
         week_starts_on: normalize_week_starts_on(settings.week_starts_on),

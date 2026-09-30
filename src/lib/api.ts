@@ -1,4 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { notifyLocalDataChanged } from "./syncOnChange";
+
+async function afterLocalMutation<T>(work: Promise<T>): Promise<T> {
+  const result = await work;
+  notifyLocalDataChanged();
+  return result;
+}
 
 export type TaskStatus = "todo" | "done";
 export type TaskPriority = "high" | "medium" | "low";
@@ -52,16 +59,18 @@ export function createTask(input: {
   estimate_pomodoros?: number;
   parent_id?: string | null;
 }): Promise<Task> {
-  return invoke("create_task", {
-    input: {
-      title: input.title,
-      notes: input.notes ?? "",
-      priority: input.priority ?? "high",
-      category_id: input.category_id ?? null,
-      estimate_pomodoros: input.estimate_pomodoros ?? 0,
-      parent_id: input.parent_id ?? null,
-    },
-  });
+  return afterLocalMutation(
+    invoke("create_task", {
+      input: {
+        title: input.title,
+        notes: input.notes ?? "",
+        priority: input.priority ?? "high",
+        category_id: input.category_id ?? null,
+        estimate_pomodoros: input.estimate_pomodoros ?? 0,
+        parent_id: input.parent_id ?? null,
+      },
+    }),
+  );
 }
 
 export function updateTask(input: {
@@ -86,14 +95,14 @@ export function updateTask(input: {
   }
   if (input.due_at !== undefined) payload.due_at = input.due_at;
   if (input.start_at !== undefined) payload.start_at = input.start_at;
-  return invoke("update_task", { input: payload });
+  return afterLocalMutation(invoke("update_task", { input: payload }));
 }
 
 export function reparentTask(input: {
   id: string;
   parent_id: string;
 }): Promise<Task[]> {
-  return invoke("reparent_task", { input });
+  return afterLocalMutation(invoke("reparent_task", { input }));
 }
 
 export function reorderTask(input: {
@@ -101,17 +110,19 @@ export function reorderTask(input: {
   priority: TaskPriority;
   before_id?: string | null;
 }): Promise<Task[]> {
-  return invoke("reorder_task", {
-    input: {
-      id: input.id,
-      priority: input.priority,
-      before_id: input.before_id ?? null,
-    },
-  });
+  return afterLocalMutation(
+    invoke("reorder_task", {
+      input: {
+        id: input.id,
+        priority: input.priority,
+        before_id: input.before_id ?? null,
+      },
+    }),
+  );
 }
 
 export function deleteTask(id: string): Promise<void> {
-  return invoke("delete_task", { id });
+  return afterLocalMutation(invoke("delete_task", { id }));
 }
 
 export function getTask(id: string): Promise<Task> {
@@ -151,15 +162,17 @@ export function saveHabitCheckin(input: {
   note: string;
   taskIds: string[];
 }): Promise<void> {
-  return invoke("save_habit_checkin", {
-    input: {
-      task_id: input.taskId,
-      day: input.day,
-      checked: input.checked,
-      note: input.note,
-      task_ids: input.taskIds,
-    },
-  });
+  return afterLocalMutation(
+    invoke("save_habit_checkin", {
+      input: {
+        task_id: input.taskId,
+        day: input.day,
+        checked: input.checked,
+        note: input.note,
+        task_ids: input.taskIds,
+      },
+    }),
+  );
 }
 
 /** Returns whether the task is checked in after the toggle. */
@@ -167,7 +180,7 @@ export function toggleHabitCheckin(
   taskId: string,
   day: string,
 ): Promise<boolean> {
-  return invoke("toggle_habit_checkin", { taskId, day });
+  return afterLocalMutation(invoke("toggle_habit_checkin", { taskId, day }));
 }
 
 export function listCategories(): Promise<Category[]> {
@@ -175,7 +188,7 @@ export function listCategories(): Promise<Category[]> {
 }
 
 export function createCategory(name: string, color: string): Promise<Category> {
-  return invoke("create_category", { input: { name, color } });
+  return afterLocalMutation(invoke("create_category", { input: { name, color } }));
 }
 
 export function updateCategory(input: {
@@ -183,11 +196,11 @@ export function updateCategory(input: {
   name?: string;
   color?: string;
 }): Promise<Category> {
-  return invoke("update_category", { input });
+  return afterLocalMutation(invoke("update_category", { input }));
 }
 
 export function deleteCategory(id: string): Promise<void> {
-  return invoke("delete_category", { id });
+  return afterLocalMutation(invoke("delete_category", { id }));
 }
 
 export function recordPomodoroSession(input: {
@@ -199,7 +212,7 @@ export function recordPomodoroSession(input: {
   completed: boolean;
   credit?: number;
 }): Promise<PomodoroSession> {
-  return invoke("record_pomodoro_session", { input });
+  return afterLocalMutation(invoke("record_pomodoro_session", { input }));
 }
 
 /** Local calendar-day start as unix ms. */
@@ -294,6 +307,10 @@ export function readSoundFile(path: string): Promise<number[]> {
   return invoke("read_sound_file", { path });
 }
 
+export function persistSoundFile(path: string): Promise<string> {
+  return invoke("persist_sound_file", { path });
+}
+
 export function getPomodoroSettings(): Promise<PomodoroSettings> {
   return invoke("get_pomodoro_settings");
 }
@@ -321,6 +338,8 @@ export interface SystemSettings {
   syncEnabled: boolean;
   syncMethod: SyncMethod;
   syncIntervalMinutes: SyncIntervalMinutes;
+  /** Desktop: sync shortly after tasks / check-ins / pomodoro data change. */
+  syncOnDataChange: boolean;
   localBackupDir: string | null;
   gitCommitMessage: string;
   weekStartsOn: WeekStartsOn;
@@ -341,6 +360,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   syncEnabled: false,
   syncMethod: "local",
   syncIntervalMinutes: 10,
+  syncOnDataChange: false,
   localBackupDir: null,
   gitCommitMessage: "chore: sync Abyss Gazer data",
   weekStartsOn: 1,
