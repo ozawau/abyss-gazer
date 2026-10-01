@@ -184,17 +184,32 @@ export function calendarTasksOnDay(tasks: Task[], day: Date): Task[] {
   return [...completed, ...scheduled];
 }
 
+export function sessionEffectiveEndMs(session: PomodoroSession): number {
+  const start = session.started_at;
+  const rawEnd = session.ended_at;
+  if (rawEnd <= start) return start + 60_000;
+  if (session.kind !== "focus") return rawEnd;
+  const plannedMs = session.planned_seconds * 1000;
+  const credit =
+    session.credit ?? (session.completed ? 1 : 0);
+  const maxMs = Math.max(plannedMs * Math.max(credit, 0.05), 60_000);
+  return Math.min(rawEnd, start + maxMs);
+}
+
 export function sessionIntersectsDay(session: PomodoroSession, day: Date): boolean {
   const dayStart = startOfLocalDay(day).getTime();
   const dayEnd = addDays(startOfLocalDay(day), 1).getTime();
-  return session.started_at < dayEnd && session.ended_at > dayStart;
+  const endMs = sessionEffectiveEndMs(session);
+  return session.started_at < dayEnd && endMs > dayStart;
 }
 
 export function focusSessionsOnDay(
   sessions: PomodoroSession[],
   day: Date,
 ): PomodoroSession[] {
-  return sessions.filter((s) => sessionIntersectsDay(s, day));
+  return sessions.filter(
+    (s) => s.kind === "focus" && sessionIntersectsDay(s, day),
+  );
 }
 
 /** Completed focus sessions that started on this local day. */
@@ -220,7 +235,7 @@ export function clipSessionToDay(
   const dayStart = startOfLocalDay(day).getTime();
   const dayEnd = addDays(startOfLocalDay(day), 1).getTime();
   const startMs = Math.max(session.started_at, dayStart);
-  const endMs = Math.min(session.ended_at, dayEnd);
+  const endMs = Math.min(sessionEffectiveEndMs(session), dayEnd);
   if (endMs <= startMs) return null;
   const startMin = (startMs - dayStart) / 60_000;
   const endMin = (endMs - dayStart) / 60_000;

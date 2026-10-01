@@ -31,6 +31,7 @@ import {
   CalendarMode,
   categoryColor,
   clipSessionToDay,
+  sessionEffectiveEndMs,
   completedTasksOnDay,
   completedFocusCountOnDay,
   countDayActivity,
@@ -59,6 +60,7 @@ import {
 import { formatLunarDayShort, formatShortDate } from "../lib/dateDisplay";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
 import { formatTaskLineage, leafTasks } from "../lib/taskTree";
+import { useFollowLocalToday, useLocalToday } from "../lib/useLocalToday";
 import { isAndroidDevice, useNarrowViewport } from "../lib/viewport";
 
 interface CalendarViewProps {
@@ -101,7 +103,7 @@ export function CalendarView({
   useCnHolidayRevision();
   const viewRef = useRef<HTMLDivElement>(null);
   const weekViewportRef = useRef<HTMLDivElement>(null);
-  const today = useMemo(() => startOfLocalDay(new Date()), []);
+  const today = useLocalToday();
   const android = isAndroidDevice();
   const narrow = useNarrowViewport();
   const androidWeekRotated = android && narrow;
@@ -113,6 +115,8 @@ export function CalendarView({
   const [selectedDay, setSelectedDay] = useState<Date>(() =>
     startOfLocalDay(new Date()),
   );
+  useFollowLocalToday(today, setSelectedDay);
+  useFollowLocalToday(today, setCursor);
   const [categories, setCategories] = useState<Category[]>([]);
   const [hideDone, setHideDone] = useState(false);
   const [sessions, setSessions] = useState<PomodoroSession[]>([]);
@@ -1171,7 +1175,7 @@ function WeekGrid({
               const minWidthPct = androidLayout ? 1.2 : 0.35;
               const color = categoryColor(task.category_id, categoryMap);
               const tip = `${formatTimeHm(session.started_at)}–${formatTimeHm(
-                session.ended_at,
+                sessionEffectiveEndMs(session),
               )} ${task.title}`;
               return (
                 <button
@@ -1422,7 +1426,8 @@ function CalendarWeekFocusCard({
       <p>{formatDayPanelTitle(day, locale)}</p>
       <p>
         {t("calendar.focusedMark")}{" "}
-        {formatTimeHm(session.started_at)}–{formatTimeHm(session.ended_at)}
+        {formatTimeHm(session.started_at)}–
+        {formatTimeHm(sessionEffectiveEndMs(session))}
       </p>
       <p>
         {task.status === "done" ? t("common.done") : t("common.notDone")}
@@ -1488,7 +1493,7 @@ function DayFocusList({
                   <em>{t("calendar.focusedMark")}</em>
                   <span>
                     {formatTimeHm(session.started_at)}–
-                    {formatTimeHm(session.ended_at)}
+                    {formatTimeHm(sessionEffectiveEndMs(session))}
                   </span>
                 </span>
               </button>

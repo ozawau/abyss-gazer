@@ -50,6 +50,8 @@ import {
   categoryIdFromFilter,
   type CategoryFilter,
 } from "../lib/categoryFilter";
+import { dayKey } from "../lib/calendar";
+import { useLocalToday } from "../lib/useLocalToday";
 import { isAndroidDevice } from "../lib/viewport";
 import {
   applyAncestorFields,
@@ -298,6 +300,8 @@ export function TasksView({
   dataEpoch,
 }: TasksViewProps) {
   const { locale, t } = useI18n();
+  const today = useLocalToday();
+  const todayKey = dayKey(today);
   const android = isAndroidDevice();
   const [draft, setDraft] = useState("");
   const [draftCategoryId, setDraftCategoryId] = useState<string | null>(() =>
@@ -384,7 +388,7 @@ export function TasksView({
     return () => {
       cancelled = true;
     };
-  }, [tasks]);
+  }, [tasks, todayKey]);
 
   useEffect(() => {
     sessionStorage.setItem(EXPAND_STORAGE_KEY, JSON.stringify([...expandedIds]));

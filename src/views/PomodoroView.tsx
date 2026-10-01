@@ -15,6 +15,8 @@ import { FullscreenIcon } from "../components/FullscreenIcon";
 import { useI18n } from "../components/LocaleProvider";
 import { playPomodoroEndChime } from "../lib/pomodoroChime";
 import { vibratePomodoroEnd } from "../lib/pomodoroVibrate";
+import { dayKey } from "../lib/calendar";
+import { useLocalToday } from "../lib/useLocalToday";
 import { formatTaskLineage, taskById } from "../lib/taskTree";
 import {
   formatPomodoroAmount,
@@ -78,6 +80,8 @@ export function PomodoroView({
   dataEpoch = 0,
 }: PomodoroViewProps) {
   const { locale, t } = useI18n();
+  const today = useLocalToday();
+  const todayKey = dayKey(today);
   const [phase, setPhase] = useState<TimerPhase>("focus");
   const [status, setStatus] = useState<TimerStatus>("idle");
   const [remaining, setRemaining] = useState(
@@ -104,6 +108,8 @@ export function PomodoroView({
   /** Tenths of the current focus pomodoro already written to a task. */
   const creditedTenthsRef = useRef(0);
   const sliceStartedAtRef = useRef<number | null>(null);
+  /** When the current task id was bound to the running segment (for credit ranges). */
+  const taskBoundAtRef = useRef<number | null>(null);
   const taskByIdMap = useMemo(() => taskById(tasks), [tasks]);
   const selectedTaskTitle = selectedTask
     ? formatTaskLineage(selectedTask, taskByIdMap)
@@ -116,6 +122,49 @@ export function PomodoroView({
   selectedTaskRef.current = selectedTask;
   settingsRef.current = settings;
   if (selectedTaskTitle) lastTaskTitleRef.current = selectedTaskTitle;
+
+  function bindSessionTask(taskId: string, resetSlice = true) {
+    const changed = sessionTaskIdRef.current !== taskId;
+    sessionTaskIdRef.current = taskId;
+    const now = Date.now();
+    if (changed) {
+      taskBoundAtRef.current = now;
+      sliceStartedAtRef.current = now;
+    } else if (resetSlice) {
+      taskBoundAtRef.current = now;
+      sliceStartedAtRef.current = now;
+    }
+  }
+
+  function clearSessionClock() {
+    startedAtRef.current = null;
+    sliceStartedAtRef.current = null;
+    sessionTaskIdRef.current = null;
+    taskBoundAtRef.current = null;
+  }
+
+  function sessionStartMs(taskId: string): number | null {
+    const task = taskByIdMap.get(taskId);
+    const slice = sliceStartedAtRef.current;
+    const bound = taskBoundAtRef.current;
+    const global = startedAtRef.current;
+    let start = slice ?? bound ?? global;
+    if (start == null) return null;
+    if (task && start < task.created_at) {
+      start = Math.max(task.created_at, bound ?? task.created_at);
+    }
+    return start;
+  }
+
+  function sessionEndMs(startedAt: number, kind: SessionKind): number {
+    const now = Date.now();
+    const plannedMs = plannedRef.current * 1000;
+    const cap = startedAt + plannedMs;
+    if (kind === "focus") {
+      return Math.max(startedAt + 1, Math.min(now, cap));
+    }
+    return Math.max(startedAt + 1, Math.min(now, cap));
+  }
 
   useEffect(() => {
     onTimingChange?.(status === "running" || status === "paused");
@@ -153,11 +202,11 @@ export function PomodoroView({
     return () => {
       cancelled = true;
     };
-  }, [selectedTask?.id, dataEpoch]);
+  }, [selectedTask?.id, dataEpoch, todayKey]);
 
   async function persistSession(completed: boolean, taskId?: string | null) {
     const id = taskId ?? sessionTaskIdRef.current ?? selectedTaskRef.current?.id;
-    const startedAt = sliceStartedAtRef.current ?? startedAtRef.current;
+    const startedAt = id ? sessionStartMs(id) : null;
     if (!id || startedAt == null) return;
     const kind = toSessionKind(phaseRef.current);
     let credit = 0;
@@ -165,7 +214,7 @@ export function PomodoroView({
       credit = Math.max(0, 10 - creditedTenthsRef.current) / 10;
       if (credit <= 0) return;
     }
-    const endedAt = Math.max(Date.now(), startedAt + 1);
+    const endedAt = sessionEndMs(startedAt, kind);
     try {
       await recordPomodoroSession({
         task_id: id,
@@ -200,8 +249,9 @@ export function PomodoroView({
     const sliceTenths = Math.round(progress * 10) - creditedTenthsRef.current;
     if (sliceTenths <= 0) return;
     creditedTenthsRef.current += sliceTenths;
-    const startedAt = sliceStartedAtRef.current ?? startedAtRef.current;
-    const endedAt = Math.max(Date.now(), startedAt + 1);
+    const startedAt = sessionStartMs(taskId);
+    if (startedAt == null) return;
+    const endedAt = sessionEndMs(startedAt, "focus");
     sliceStartedAtRef.current = endedAt;
     try {
       await recordPomodoroSession({
@@ -269,8 +319,7 @@ export function PomodoroView({
       creditedTenthsRef.current = 0;
       const now = Date.now();
       startedAtRef.current = now;
-      sliceStartedAtRef.current = now;
-      sessionTaskIdRef.current = selectedTaskRef.current.id;
+      bindSessionTask(selectedTaskRef.current.id);
       plannedRef.current = plannedFor(nextPhase, settingsRef.current);
       setRemaining(plannedRef.current);
       setStatus("running");
@@ -296,9 +345,7 @@ export function PomodoroView({
       if (vibrate) vibratePomodoroEnd();
     }
     await persistSession(completed);
-    startedAtRef.current = null;
-    sliceStartedAtRef.current = null;
-    sessionTaskIdRef.current = null;
+    clearSessionClock();
     creditedTenthsRef.current = 0;
 
     const nextPhase = await nextPhaseFrom(current, completed);
@@ -332,8 +379,7 @@ export function PomodoroView({
     if (
       completed &&
       phaseRef.current === "focus" &&
-      (sessionTaskIdRef.current == null ||
-        sessionTaskIdRef.current === selectedTask.id)
+      sessionTaskIdRef.current === selectedTask.id
     ) {
       void creditElapsedFocus(selectedTask.id);
     }
@@ -351,6 +397,19 @@ export function PomodoroView({
       if (finishingRef.current || statusRef.current !== "running") return;
       const endsAt = endsAtRef.current;
       if (endsAt == null) return;
+      const taskId = sessionTaskIdRef.current ?? selectedTaskRef.current?.id;
+      if (taskId && phaseRef.current === "focus") {
+        const start = sessionStartMs(taskId);
+        if (
+          start != null &&
+          Date.now() - start >= plannedRef.current * 1000
+        ) {
+          remainingRef.current = 0;
+          setRemaining(0);
+          void finishSegment(true);
+          return;
+        }
+      }
       const next = secondsUntil(endsAt);
       if (next !== remainingRef.current) {
         remainingRef.current = next;
@@ -359,11 +418,16 @@ export function PomodoroView({
       if (next <= 0) void finishSegment(true);
     };
 
+    const onWake = () => sync();
+
     sync();
     const id = window.setInterval(sync, 1000);
-    const onWake = () => sync();
-    document.addEventListener("visibilitychange", onWake);
+    const onVis = () => {
+      if (document.visibilityState === "visible") sync();
+    };
+    document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onWake);
+    window.addEventListener("abyss-foreground", onWake);
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     void getCurrentWindow()
@@ -381,8 +445,9 @@ export function PomodoroView({
     return () => {
       cancelled = true;
       window.clearInterval(id);
-      document.removeEventListener("visibilitychange", onWake);
+      document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("focus", onWake);
+      window.removeEventListener("abyss-foreground", onWake);
       unlisten?.();
       if (endsAtRef.current != null && statusRef.current === "paused") {
         const next = secondsUntil(endsAtRef.current);
@@ -410,8 +475,7 @@ export function PomodoroView({
       creditedTenthsRef.current = 0;
       const now = Date.now();
       startedAtRef.current = now;
-      sliceStartedAtRef.current = now;
-      sessionTaskIdRef.current = selectedTaskRef.current.id;
+      bindSessionTask(selectedTaskRef.current.id);
       plannedRef.current = plannedFor(phaseRef.current, settingsRef.current);
       if (remainingRef.current <= 0) {
         setRemaining(plannedRef.current);
@@ -446,9 +510,7 @@ export function PomodoroView({
     if (startedAtRef.current != null) {
       await persistSession(false);
     }
-    startedAtRef.current = null;
-    sliceStartedAtRef.current = null;
-    sessionTaskIdRef.current = null;
+    clearSessionClock();
     creditedTenthsRef.current = 0;
     finishingRef.current = false;
     setStatus("idle");
@@ -479,8 +541,7 @@ export function PomodoroView({
         creditedTenthsRef.current = 0;
         const now = Date.now();
         startedAtRef.current = now;
-        sliceStartedAtRef.current = now;
-        sessionTaskIdRef.current = task.id;
+        bindSessionTask(task.id);
         phaseRef.current = "focus";
         setPhase("focus");
         const next = plannedFor("focus", settingsRef.current);
@@ -503,13 +564,11 @@ export function PomodoroView({
       ) {
         const previousId = sessionTaskIdRef.current;
         void persistSession(false, previousId).then(() => {
-          const now = Date.now();
-          startedAtRef.current = now;
-          sliceStartedAtRef.current = now;
-          sessionTaskIdRef.current = task.id;
+          startedAtRef.current = Date.now();
+          bindSessionTask(task.id);
         });
       } else {
-        sessionTaskIdRef.current = task.id;
+        bindSessionTask(task.id);
       }
       setError(null);
       return;
@@ -520,7 +579,7 @@ export function PomodoroView({
       remainingRef.current > 0 &&
       startedAtRef.current != null;
     if (resumable) {
-      sessionTaskIdRef.current = task.id;
+      bindSessionTask(task.id, false);
       setError(null);
       setStatus("running");
       return;
@@ -533,10 +592,8 @@ export function PomodoroView({
         await persistSession(false);
       }
       creditedTenthsRef.current = 0;
-      const now = Date.now();
-      startedAtRef.current = now;
-      sliceStartedAtRef.current = now;
-      sessionTaskIdRef.current = task.id;
+      startedAtRef.current = Date.now();
+      bindSessionTask(task.id);
       setPhase("focus");
       const next = plannedFor("focus", settingsRef.current);
       plannedRef.current = next;

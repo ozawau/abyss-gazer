@@ -15,6 +15,7 @@ import {
   type WeekStartsOn,
 } from "../lib/calendar";
 import { leafTasks } from "../lib/taskTree";
+import { useLocalToday } from "../lib/useLocalToday";
 import { useI18n } from "../components/LocaleProvider";
 import "../styles/tray-calendar.css";
 
@@ -36,7 +37,7 @@ export function TrayCalendar() {
   const [weekStartsOn, setWeekStartsOn] = useState<WeekStartsOn>(DEFAULT_WEEK_STARTS_ON);
   const [markedDays, setMarkedDays] = useState<ReadonlySet<string>>(() => new Set());
   const [reloadToken, setReloadToken] = useState(0);
-  const today = useMemo(() => startOfLocalDay(new Date()), [reloadToken]);
+  const today = useLocalToday();
 
   useEffect(() => {
     return () => {

@@ -12,6 +12,7 @@ let messages: SyncMessages = { success: "Sync OK", failure: (d) => d };
 let afterSuccess: (() => Promise<void>) | null = null;
 let debounceId = 0;
 let inFlight = false;
+let pendingAfterFlight = false;
 
 export function configureDataSync(options: {
   syncEnabled: boolean;
@@ -35,15 +36,26 @@ export function configureDataSync(options: {
 }
 
 export async function runSyncCycle(): Promise<void> {
-  if (!syncEnabled || inFlight) return;
+  if (!syncEnabled) return;
+  if (inFlight) {
+    pendingAfterFlight = true;
+    return;
+  }
   inFlight = true;
   try {
-    await runDataSync();
-    await afterSuccess?.();
+    do {
+      pendingAfterFlight = false;
+      await runDataSync();
+      await afterSuccess?.();
+    } while (pendingAfterFlight);
     showSyncResultToast(messages.success, true);
   } catch (err) {
     showSyncResultToast(messages.failure(String(err)), false);
   } finally {
     inFlight = false;
+    if (pendingAfterFlight) {
+      pendingAfterFlight = false;
+      void runSyncCycle();
+    }
   }
 }

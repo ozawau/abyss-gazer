@@ -226,8 +226,9 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
         return Ok(());
     }
     let t = env.data.as_ref().unwrap();
+    let remote_ts = env.updated_at.max(t.updated_at);
     let local = local_task_updated_at(conn, &t.id)?;
-    if local.is_some_and(|ts| ts >= env.updated_at) {
+    if local.is_some_and(|ts| ts >= remote_ts) {
         return Ok(());
     }
     conn.execute(

@@ -18,7 +18,7 @@ use tauri::{AppHandle, Manager, State};
 #[cfg(desktop)]
 use tauri_plugin_autostart::ManagerExt;
 
-/// Only one sync runs at a time. A second request returns immediately.
+/// Only one sync runs at a time; concurrent callers block until it finishes.
 static SYNC_GATE: SyncGate<()> = SyncGate::new(());
 
 fn checkpoint_db(conn: &rusqlite::Connection) -> Result<(), String> {
@@ -197,7 +197,9 @@ fn map_git_push_err(e: String) -> String {
 
 fn merge_and_export_logical(conn: &mut Connection, data_dir: &Path, db_path: &Path) -> Result<(), String> {
     *conn = open_db(db_path).map_err(|e| format!("拉取后打开数据库失败: {e}"))?;
+    checkpoint_db(conn)?;
     import_logical(conn, data_dir)?;
+    checkpoint_db(conn)?;
     export_logical(conn, data_dir)?;
     ensure_data_gitignore(data_dir)?;
     untrack_database_from_git(data_dir)?;
@@ -497,9 +499,9 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
 
     let app_for_sync = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        let Ok(_gate) = SYNC_GATE.try_lock() else {
-            return Ok(());
-        };
+        let _gate = SYNC_GATE
+            .lock()
+            .map_err(|e| format!("同步锁失败: {e}"))?;
         let state = app_for_sync.state::<DbState>();
         let db_path = {
             let conn = state.conn.lock().map_err(|e| e.to_string())?;

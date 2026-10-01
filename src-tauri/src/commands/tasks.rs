@@ -72,6 +72,11 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Local edits must win over the last exported sync revision (same millisecond / stale remote).
+fn monotonic_updated_at(previous: i64) -> i64 {
+    now_ms().max(previous.saturating_add(1))
+}
+
 fn is_valid_priority(priority: &str) -> bool {
     matches!(priority, "high" | "medium" | "low")
 }
@@ -402,7 +407,7 @@ pub fn update_task(
         Some(Some(ts)) => Some(ts),
     };
 
-    let updated_at = now_ms();
+    let updated_at = monotonic_updated_at(existing.updated_at);
     let completed_at = if status == "done" {
         if previous_status == "done" {
             existing.completed_at.or(Some(updated_at))

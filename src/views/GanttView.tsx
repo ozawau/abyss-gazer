@@ -27,6 +27,7 @@ import { FullscreenIcon } from "../components/FullscreenIcon";
 import { useI18n } from "../components/LocaleProvider";
 import type { AppLocale } from "../lib/i18n";
 import { ANDROID_BACK_EVENT, useDismissOnAndroidBack } from "../lib/androidBack";
+import { useLocalToday } from "../lib/useLocalToday";
 import { isAndroidDevice, useNarrowViewport } from "../lib/viewport";
 import {
   buildGanttDayRange,
@@ -87,7 +88,7 @@ export function GanttView({
   const android = isAndroidDevice();
   const narrow = useNarrowViewport();
   const desktopNarrow = narrow && !android;
-  const today = useMemo(() => startOfLocalDay(new Date()), []);
+  const today = useLocalToday();
   const [scale, setScale] = useState<GanttScale | null>("week");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
   const [customRange, setCustomRange] = useState<{ start: Date; end: Date } | null>(

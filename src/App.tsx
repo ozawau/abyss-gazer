@@ -23,6 +23,7 @@ import { type PomodoroTick } from "./lib/pomodoroTimer";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
 import { ANDROID_BACK_EVENT, dismissTopAndroidPopup } from "./lib/androidBack";
 import { configureDataSync, runSyncCycle } from "./lib/dataSync";
+import { notifyLocalTodayRefresh } from "./lib/useLocalToday";
 import { isAndroidDevice, useNarrowViewport } from "./lib/viewport";
 import { formatTaskLineage, taskById } from "./lib/taskTree";
 import type { TasksSubPage } from "./lib/tasksNav";
@@ -145,6 +146,10 @@ function MainApp() {
   useEffect(() => {
     initCnHolidayData();
   }, []);
+
+  useEffect(() => {
+    notifyLocalTodayRefresh();
+  }, [activeView, tasksSubPage]);
 
   useEffect(() => {
     let cancelled = false;

@@ -35,6 +35,7 @@ import {
   isCheckinRootTask,
   resolveCheckinCategoryId,
 } from "../lib/taskCategories";
+import { useFollowLocalToday, useLocalToday } from "../lib/useLocalToday";
 
 interface CheckinViewProps {
   tasks: Task[];
@@ -183,9 +184,10 @@ export function CheckinView({
 }: CheckinViewProps) {
   const { locale, t } = useI18n();
   useCnHolidayRevision();
-  const today = useMemo(() => startOfLocalDay(new Date()), []);
+  const today = useLocalToday();
   const [mode, setMode] = useState<CheckinMode>("week");
   const [cursor, setCursor] = useState(() => startOfLocalDay(new Date()));
+  useFollowLocalToday(today, setCursor);
   const [categories, setCategories] = useState<Category[]>([]);
   const [checked, setChecked] = useState<Set<string>>(() => new Set());
   const [details, setDetails] = useState<Map<string, CheckinDetail>>(() => new Map());
