@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { PomodoroSettings } from "./api";
 import { translate, type AppLocale } from "./i18n";
 import {
   formatPomodoroClock,
@@ -47,6 +48,7 @@ async function applyWindowFallback(windowTitle: string, badge: string) {
 export async function syncPomodoroPresence(
   tick: PomodoroTick | null,
   locale: AppLocale = "zh",
+  settings?: PomodoroSettings | null,
 ): Promise<void> {
   const resolved = resolveTick(tick);
   const title = presenceTitle(resolved);
@@ -57,6 +59,24 @@ export async function syncPomodoroPresence(
   try {
     const timerActive =
       resolved.status === "running" || resolved.status === "paused";
+    const timerEndsAtMs =
+      resolved.status === "running"
+        ? Date.now() + resolved.remaining * 1000
+        : 0;
+    const timerRunning = resolved.status === "running";
+    const autoBreakAfterFocus =
+      timerRunning &&
+      !!settings?.breaksEnabled &&
+      !!settings?.autoStartBreak;
+    const breakSecondsAfterFocus =
+      autoBreakAfterFocus && settings
+        ? Math.max(1, settings.shortBreakMinutes) * 60
+        : 0;
+    const autoFocusAfterBreak = timerRunning && !!settings?.autoStartFocus;
+    const focusSecondsAfterBreak =
+      autoFocusAfterBreak && settings
+        ? Math.max(1, settings.focusMinutes) * 60
+        : 0;
     await invoke("set_pomodoro_tray", {
       title,
       tooltip,
@@ -66,6 +86,18 @@ export async function syncPomodoroPresence(
       timerPaused: resolved.status === "paused",
       timerClock: formatPomodoroClock(resolved.remaining),
       timerFocusPhase: resolved.phase === "focus",
+      timerEndsAtMs,
+      timer_ends_at_ms: timerEndsAtMs,
+      timerPhase: resolved.phase,
+      timer_phase: resolved.phase,
+      autoBreakAfterFocus,
+      auto_break_after_focus: autoBreakAfterFocus,
+      breakSecondsAfterFocus,
+      break_seconds_after_focus: breakSecondsAfterFocus,
+      autoFocusAfterBreak,
+      auto_focus_after_break: autoFocusAfterBreak,
+      focusSecondsAfterBreak,
+      focus_seconds_after_break: focusSecondsAfterBreak,
     });
   } catch (err) {
     console.error("pomodoro tray update failed", err);

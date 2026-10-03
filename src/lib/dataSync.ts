@@ -1,4 +1,4 @@
-import { runDataSync } from "./api";
+import { isSyncCancelled, preemptDataSync, runDataSync } from "./api";
 import { showSyncResultToast } from "./syncToast";
 import { registerSyncOnChangeTrigger } from "./syncOnChange";
 
@@ -35,10 +35,15 @@ export function configureDataSync(options: {
   }
 }
 
+function requestSyncRestartWhileInFlight() {
+  pendingAfterFlight = true;
+  void preemptDataSync();
+}
+
 export async function runSyncCycle(): Promise<void> {
   if (!syncEnabled) return;
   if (inFlight) {
-    pendingAfterFlight = true;
+    requestSyncRestartWhileInFlight();
     return;
   }
   inFlight = true;
@@ -50,6 +55,9 @@ export async function runSyncCycle(): Promise<void> {
     } while (pendingAfterFlight);
     showSyncResultToast(messages.success, true);
   } catch (err) {
+    if (isSyncCancelled(err)) {
+      return;
+    }
     showSyncResultToast(messages.failure(String(err)), false);
   } finally {
     inFlight = false;

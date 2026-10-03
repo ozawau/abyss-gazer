@@ -288,18 +288,29 @@ function MainApp() {
     activeView === "tasks" && (narrow || !!subNavOpen.tasks);
   const sidebarCollapsed = !narrow && !sidebarOpen;
 
+  const pomodoroTickRef = useRef(pomodoroTick);
+  pomodoroTickRef.current = pomodoroTick;
+
   const handlePomodoroTick = useCallback((tick: PomodoroTick) => {
     setPomodoroTick(tick);
     setPomodoroTiming(tick.status !== "idle");
   }, []);
 
   useEffect(() => {
-    void syncPomodoroPresence(pomodoroTick, locale);
-  }, [pomodoroTick, locale]);
+    void syncPomodoroPresence(pomodoroTick, locale, pomodoroSettings);
+  }, [pomodoroTick, locale, pomodoroSettings]);
+
+  useEffect(() => {
+    const flushPresence = () => {
+      void syncPomodoroPresence(pomodoroTickRef.current, locale, pomodoroSettings);
+    };
+    window.addEventListener("abyss-background", flushPresence);
+    return () => window.removeEventListener("abyss-background", flushPresence);
+  }, [locale, pomodoroSettings]);
 
   useEffect(() => {
     return () => {
-      void syncPomodoroPresence(null, locale);
+      void syncPomodoroPresence(null, locale, pomodoroSettings);
     };
   }, [locale]);
 
@@ -557,6 +568,7 @@ function MainApp() {
             }
             onTimingChange={setPomodoroTiming}
             onTick={handlePomodoroTick}
+            onTasksChange={setTasks}
             onTaskChange={(task) => {
               setTasks((prev) =>
                 prev.map((row) => (row.id === task.id ? task : row)),

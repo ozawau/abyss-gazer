@@ -169,21 +169,35 @@ pub fn update_timer_notification(
     focus_phase: bool,
     active: bool,
     paused: bool,
+    ends_at_ms: i64,
+    timer_phase: &str,
+    auto_break_after_focus: bool,
+    break_seconds_after_focus: i64,
+    auto_focus_after_break: bool,
+    focus_seconds_after_break: i64,
 ) -> Result<(), String> {
     let clock = clock.to_string();
+    let timer_phase = timer_phase.to_string();
     with_android_activity(app, move |env, activity| {
         let class = pomodoro_class(env, activity)?;
         let jclock = jstring(env, &clock)?;
+        let jphase = jstring(env, &timer_phase)?;
         env.call_static_method(
             class,
             "updateTimerNotification",
-            "(Landroid/app/Activity;Ljava/lang/String;ZZZ)V",
+            "(Landroid/app/Activity;Ljava/lang/String;ZZZJLjava/lang/String;ZJZJ)V",
             &[
                 JValue::Object(activity),
                 JValue::Object(&jclock),
                 JValue::Bool(focus_phase as u8),
                 JValue::Bool(active as u8),
                 JValue::Bool(paused as u8),
+                JValue::Long(ends_at_ms),
+                JValue::Object(&jphase),
+                JValue::Bool(auto_break_after_focus as u8),
+                JValue::Long(break_seconds_after_focus),
+                JValue::Bool(auto_focus_after_break as u8),
+                JValue::Long(focus_seconds_after_break),
             ],
         )
         .map_err(|err| format!("无法更新通知: {err}"))?;

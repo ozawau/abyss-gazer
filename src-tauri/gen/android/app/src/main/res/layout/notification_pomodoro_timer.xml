@@ -5,10 +5,11 @@
     android:paddingTop="4dp"
     android:paddingBottom="4dp">
 
-    <TextView
+    <Chronometer
         android:id="@+id/pomodoro_timer_clock"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:countDown="true"
         android:gravity="center_vertical|start"
         android:includeFontPadding="false"
         android:maxLines="1"

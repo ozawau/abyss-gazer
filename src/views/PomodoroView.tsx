@@ -5,6 +5,7 @@ import {
   countFocusSessionsTotalSince,
   DEFAULT_POMODORO_SETTINGS,
   PomodoroSettings,
+  listTasks,
   recordPomodoroSession,
   SessionKind,
   startOfLocalDayMs,
@@ -40,6 +41,7 @@ interface PomodoroViewProps {
   onTimingChange?: (timing: boolean) => void;
   onTick?: (tick: PomodoroTick) => void;
   onTaskChange?: (task: Task) => void;
+  onTasksChange?: (tasks: Task[]) => void;
   dataEpoch?: number;
 }
 
@@ -66,6 +68,12 @@ function secondsUntil(endsAt: number, now = Date.now()): number {
   return Math.max(0, Math.ceil((endsAt - now) / 1000));
 }
 
+function taskIdFromBoundKey(key: string | null): string | null {
+  if (!key) return null;
+  const sep = key.lastIndexOf(":");
+  return sep > 0 ? key.slice(0, sep) : null;
+}
+
 export function PomodoroView({
   tasks,
   selectedTask,
@@ -77,6 +85,7 @@ export function PomodoroView({
   onTimingChange,
   onTick,
   onTaskChange,
+  onTasksChange,
   dataEpoch = 0,
 }: PomodoroViewProps) {
   const { locale, t } = useI18n();
@@ -240,6 +249,9 @@ export function PomodoroView({
   async function creditElapsedFocus(taskId: string) {
     if (finishingRef.current || phaseRef.current !== "focus") return;
     if (startedAtRef.current == null) return;
+    if (sessionTaskIdRef.current != null && sessionTaskIdRef.current !== taskId) {
+      return;
+    }
     const planned = plannedRef.current;
     if (planned <= 0) return;
     const progress = Math.min(
@@ -369,23 +381,32 @@ export function PomodoroView({
       statusRef.current === "running" || statusRef.current === "paused";
     if (!active || startedAtRef.current == null) return;
 
+    const prevId = taskIdFromBoundKey(prev);
     const deleted = prev != null && next == null;
     const completed =
       selectedTask != null &&
       selectedTask.status === "done" &&
+      prevId === selectedTask.id &&
       prev != null &&
-      prev.endsWith(":todo") &&
-      prev.startsWith(`${selectedTask.id}:`);
-    if (
-      completed &&
-      phaseRef.current === "focus" &&
-      sessionTaskIdRef.current === selectedTask.id
-    ) {
-      void creditElapsedFocus(selectedTask.id);
-    }
-    if ((deleted || completed) && statusRef.current === "running") {
-      setStatus("paused");
-    }
+      prev.endsWith(":todo");
+
+    void (async () => {
+      if (
+        completed &&
+        phaseRef.current === "focus" &&
+        sessionTaskIdRef.current === selectedTask.id
+      ) {
+        await creditElapsedFocus(selectedTask.id);
+      }
+      if ((deleted || completed) && statusRef.current === "running") {
+        if (statusRef.current === "running" && endsAtRef.current != null) {
+          const left = secondsUntil(endsAtRef.current);
+          remainingRef.current = left;
+          setRemaining(left);
+        }
+        setStatus("paused");
+      }
+    })();
   }, [selectedTask]);
 
   useEffect(() => {
@@ -423,7 +444,7 @@ export function PomodoroView({
     sync();
     const id = window.setInterval(sync, 1000);
     const onVis = () => {
-      if (document.visibilityState === "visible") sync();
+      sync();
     };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onWake);
@@ -527,6 +548,17 @@ export function PomodoroView({
     const task = selectedTaskRef.current;
     if (!task) return;
 
+    void (async () => {
+    const outgoingId = sessionTaskIdRef.current;
+    if (
+      outgoingId &&
+      outgoingId !== task.id &&
+      phaseRef.current === "focus" &&
+      startedAtRef.current != null
+    ) {
+      await creditElapsedFocus(outgoingId);
+    }
+
     const breakUnderway =
       isBreakPhase(phaseRef.current) &&
       (statusRef.current === "running" || statusRef.current === "paused");
@@ -563,10 +595,9 @@ export function PomodoroView({
         startedAtRef.current != null
       ) {
         const previousId = sessionTaskIdRef.current;
-        void persistSession(false, previousId).then(() => {
-          startedAtRef.current = Date.now();
-          bindSessionTask(task.id);
-        });
+        await creditElapsedFocus(previousId);
+        startedAtRef.current = Date.now();
+        bindSessionTask(task.id);
       } else {
         bindSessionTask(task.id);
       }
@@ -585,20 +616,19 @@ export function PomodoroView({
       return;
     }
 
-    void (async () => {
-      setError(null);
-      finishingRef.current = false;
-      if (startedAtRef.current != null) {
-        await persistSession(false);
-      }
-      creditedTenthsRef.current = 0;
-      startedAtRef.current = Date.now();
-      bindSessionTask(task.id);
-      setPhase("focus");
-      const next = plannedFor("focus", settingsRef.current);
-      plannedRef.current = next;
-      setRemaining(next);
-      setStatus("running");
+    setError(null);
+    finishingRef.current = false;
+    if (startedAtRef.current != null) {
+      await persistSession(false);
+    }
+    creditedTenthsRef.current = 0;
+    startedAtRef.current = Date.now();
+    bindSessionTask(task.id);
+    setPhase("focus");
+    const next = plannedFor("focus", settingsRef.current);
+    plannedRef.current = next;
+    setRemaining(next);
+    setStatus("running");
     })();
   }, [playToken]);
 
@@ -608,11 +638,16 @@ export function PomodoroView({
     setTogglingDone(true);
     setError(null);
     try {
+      const markingDone = task.status === "todo";
       const next = await updateTask({
         id: task.id,
-        status: task.status === "done" ? "todo" : "done",
+        status: markingDone ? "done" : "todo",
       });
-      onTaskChange?.(next);
+      if (markingDone && onTasksChange) {
+        onTasksChange(await listTasks());
+      } else {
+        onTaskChange?.(next);
+      }
     } catch (err) {
       setError(String(err));
     } finally {

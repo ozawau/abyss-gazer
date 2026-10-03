@@ -176,7 +176,9 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let raw = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    // Single-line canonical JSON so Mac/Android/git diffs only reflect data, not layout.
+    let mut raw = serde_json::to_string(value).map_err(|e| e.to_string())?;
+    raw.push('\n');
     fs::write(path, raw).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -783,6 +785,29 @@ mod tests {
     use super::*;
     use crate::db::open_db;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn category_envelope_canonical_json() {
+        let env = SyncEnvelope {
+            v: SYNC_FORMAT_VERSION,
+            updated_at: 1790612199963,
+            deleted: false,
+            data: Some(SyncCategory {
+                id: "f0aa00b0-0099-4a8a-933c-ea0910f36485".into(),
+                name: "Note".into(),
+                color: "#475569".into(),
+                created_at: 1790612199963,
+                updated_at: 1790612199963,
+            }),
+        };
+        let raw = serde_json::to_string(&env).unwrap();
+        assert!(
+            raw.starts_with("{\"v\":1,\"updated_at\":1790612199963,\"deleted\":false,\"data\":"),
+            "unexpected key order: {raw}"
+        );
+        let back: SyncEnvelope<SyncCategory> = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back.data.as_ref().unwrap().name, "Note");
+    }
 
     #[test]
     fn export_import_roundtrip() {

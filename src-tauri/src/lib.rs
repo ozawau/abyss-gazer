@@ -80,6 +80,7 @@ pub fn run() {
             commands::sync::set_data_directory,
             commands::directory::pick_directory,
             commands::sync::run_data_sync,
+            commands::sync::preempt_data_sync,
             commands::holidays::read_cn_holidays_cache,
             commands::holidays::write_cn_holidays_cache,
             commands::tray::set_pomodoro_tray,

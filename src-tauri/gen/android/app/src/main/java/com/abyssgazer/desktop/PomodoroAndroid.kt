@@ -1,6 +1,7 @@
 package com.abyssgazer.desktop
 
 import android.app.Activity
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -9,6 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -21,7 +23,7 @@ import java.security.MessageDigest
 
 object PomodoroAndroid {
     private const val CHANNEL_ID = "pomodoro_timer"
-    private const val NOTIFICATION_ID = 4101
+    const val NOTIFICATION_ID = 4101
     private const val MAX_SOUND_BYTES = 5 * 1024 * 1024
 
     @JvmStatic
@@ -90,27 +92,275 @@ object PomodoroAndroid {
         focusPhase: Boolean,
         active: Boolean,
         paused: Boolean,
+        endsAtMs: Long,
+        timerPhase: String,
+        autoBreakAfterFocus: Boolean,
+        breakSecondsAfterFocus: Long,
+        autoFocusAfterBreak: Boolean,
+        focusSecondsAfterBreak: Long,
+    ) {
+        val context = activity.applicationContext
+        syncTimerNotification(
+            context,
+            clock,
+            focusPhase,
+            active,
+            paused,
+            endsAtMs,
+            timerPhase,
+            autoBreakAfterFocus,
+            breakSecondsAfterFocus,
+            autoFocusAfterBreak,
+            focusSecondsAfterBreak,
+        )
+    }
+
+    @JvmStatic
+    fun syncTimerNotification(
+        context: Context,
+        clock: String,
+        focusPhase: Boolean,
+        active: Boolean,
+        paused: Boolean,
+        endsAtMs: Long,
+        timerPhase: String,
+        autoBreakAfterFocus: Boolean,
+        breakSecondsAfterFocus: Long,
+        autoFocusAfterBreak: Boolean,
+        focusSecondsAfterBreak: Long,
     ) {
         if (!active) {
-            clearTimerNotification(activity)
+            cancelTimerAlarm(context)
+            PomodoroTimerPrefs.clear(context)
+            PomodoroTimerForegroundService.stop(context)
+            clearTimerNotification(context)
             return
         }
-        if (!canPostNotifications(activity)) return
-        ensureChannel(activity)
+        if (!canPostNotifications(context)) return
+        ensureChannel(context)
+        val endsAt = resolveEndsAtMs(clock, endsAtMs, paused)
+        val phase = timerPhase.ifBlank { if (focusPhase) "focus" else "break" }
+        val existing = PomodoroTimerPrefs.read(context)
+        if (
+            existing.active &&
+            !existing.paused &&
+            existing.endsAtMs > System.currentTimeMillis() &&
+            (existing.phase == "break" || existing.phase == "long_break") &&
+            phase == "focus" &&
+            endsAt <= System.currentTimeMillis()
+        ) {
+            scheduleTimerAlarm(context, existing.endsAtMs)
+            val displayClock = formatClockMs(existing.endsAtMs - System.currentTimeMillis())
+            val notification = buildTimerNotification(
+                context,
+                displayClock,
+                existing.focusUi,
+                paused = false,
+                existing.endsAtMs,
+            )
+            PomodoroTimerForegroundService.start(context, existing.endsAtMs, existing.focusUi, displayClock)
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            return
+        }
+        if (
+            existing.active &&
+            !existing.paused &&
+            existing.endsAtMs > System.currentTimeMillis() &&
+            existing.phase == "focus" &&
+            (phase == "break" || phase == "long_break") &&
+            endsAt <= System.currentTimeMillis()
+        ) {
+            scheduleTimerAlarm(context, existing.endsAtMs)
+            val displayClock = formatClockMs(existing.endsAtMs - System.currentTimeMillis())
+            val notification = buildTimerNotification(
+                context,
+                displayClock,
+                focusPhase = true,
+                paused = false,
+                existing.endsAtMs,
+            )
+            PomodoroTimerForegroundService.start(context, existing.endsAtMs, true, displayClock)
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            return
+        }
+        PomodoroTimerPrefs.save(
+            context,
+            endsAt,
+            phase,
+            paused,
+            active,
+            focusPhase,
+            clock,
+            autoBreakAfterFocus,
+            breakSecondsAfterFocus,
+            autoFocusAfterBreak,
+            focusSecondsAfterBreak,
+        )
+        if (!paused && endsAt > 0L && endsAt <= System.currentTimeMillis()) {
+            onSegmentExpired(context)
+            return
+        }
+        if (!paused && endsAt > System.currentTimeMillis()) {
+            scheduleTimerAlarm(context, endsAt)
+        } else {
+            cancelTimerAlarm(context)
+        }
+        val runningCountdown = !paused && endsAt > System.currentTimeMillis()
+        val displayClock = if (runningCountdown) clock else formatClockMs((endsAt - System.currentTimeMillis()).coerceAtLeast(0L))
+        val notification = buildTimerNotification(context, displayClock, focusPhase, paused, endsAt)
+        if (runningCountdown) {
+            PomodoroTimerForegroundService.start(context, endsAt, focusPhase, displayClock)
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        } else {
+            PomodoroTimerForegroundService.stop(context)
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        }
+    }
+
+    internal fun onTimerAlarm(context: Context) {
+        onSegmentExpired(context)
+    }
+
+    private fun onSegmentExpired(context: Context) {
+        val state = PomodoroTimerPrefs.read(context)
+        if (!state.active || state.paused) return
+        if (state.endsAtMs > System.currentTimeMillis()) {
+            scheduleTimerAlarm(context, state.endsAtMs)
+            return
+        }
+        if (state.handledEndsAtMs == state.endsAtMs) return
+        PomodoroTimerPrefs.markHandled(context, state.endsAtMs)
+        when (state.phase) {
+            "focus" -> {
+                if (state.autoBreakAfterFocus && state.breakSecondsAfterFocus > 0L) {
+                    val breakEnds = System.currentTimeMillis() + state.breakSecondsAfterFocus * 1000L
+                    val breakClock = formatClockMs(state.breakSecondsAfterFocus * 1000L)
+                    PomodoroTimerPrefs.save(
+                        context,
+                        breakEnds,
+                        "break",
+                        paused = false,
+                        active = true,
+                        focusUi = false,
+                        clock = breakClock,
+                        autoBreakAfterFocus = state.autoBreakAfterFocus,
+                        breakSecondsAfterFocus = state.breakSecondsAfterFocus,
+                        autoFocusAfterBreak = state.autoFocusAfterBreak,
+                        focusSecondsAfterBreak = state.focusSecondsAfterBreak,
+                    )
+                    scheduleTimerAlarm(context, breakEnds)
+                    val notification = buildTimerNotification(context, breakClock, focusPhase = false, paused = false, breakEnds)
+                    PomodoroTimerForegroundService.start(context, breakEnds, false, breakClock)
+                    NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+                } else {
+                    cancelTimerAlarm(context)
+                    PomodoroTimerPrefs.clear(context)
+                    PomodoroTimerForegroundService.stop(context)
+                    clearTimerNotification(context)
+                }
+            }
+            "break", "long_break" -> {
+                if (state.autoFocusAfterBreak && state.focusSecondsAfterBreak > 0L) {
+                    val focusEnds = System.currentTimeMillis() + state.focusSecondsAfterBreak * 1000L
+                    val focusClock = formatClockMs(state.focusSecondsAfterBreak * 1000L)
+                    PomodoroTimerPrefs.save(
+                        context,
+                        focusEnds,
+                        "focus",
+                        paused = false,
+                        active = true,
+                        focusUi = true,
+                        clock = focusClock,
+                        autoBreakAfterFocus = state.autoBreakAfterFocus,
+                        breakSecondsAfterFocus = state.breakSecondsAfterFocus,
+                        autoFocusAfterBreak = state.autoFocusAfterBreak,
+                        focusSecondsAfterBreak = state.focusSecondsAfterBreak,
+                    )
+                    scheduleTimerAlarm(context, focusEnds)
+                    val notification = buildTimerNotification(context, focusClock, focusPhase = true, paused = false, focusEnds)
+                    PomodoroTimerForegroundService.start(context, focusEnds, true, focusClock)
+                    NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+                } else {
+                    cancelTimerAlarm(context)
+                    PomodoroTimerPrefs.clear(context)
+                    PomodoroTimerForegroundService.stop(context)
+                    clearTimerNotification(context)
+                }
+            }
+            else -> {
+                cancelTimerAlarm(context)
+                PomodoroTimerPrefs.clear(context)
+                PomodoroTimerForegroundService.stop(context)
+                clearTimerNotification(context)
+            }
+        }
+    }
+
+    private fun scheduleTimerAlarm(context: Context, endsAtMs: Long) {
+        val am = context.getSystemService(AlarmManager::class.java) ?: return
+        val intent = Intent(context, PomodoroTimerAlarmReceiver::class.java)
+        val pi = PendingIntent.getBroadcast(
+            context,
+            ALARM_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        cancelTimerAlarm(context)
+        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, endsAtMs, pi)
+    }
+
+    private fun cancelTimerAlarm(context: Context) {
+        val am = context.getSystemService(AlarmManager::class.java) ?: return
+        val intent = Intent(context, PomodoroTimerAlarmReceiver::class.java)
+        val pi = PendingIntent.getBroadcast(
+            context,
+            ALARM_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        am.cancel(pi)
+    }
+
+    private fun formatClockMs(remainingMs: Long): String {
+        val safe = (remainingMs / 1000L).coerceAtLeast(0L)
+        val m = (safe / 60).toString().padStart(2, '0')
+        val s = (safe % 60).toString().padStart(2, '0')
+        return "$m:$s"
+    }
+
+    private const val ALARM_REQUEST_CODE = 4102
+
+    internal fun buildTimerNotification(
+        context: Context,
+        clock: String,
+        focusPhase: Boolean,
+        paused: Boolean,
+        endsAtMs: Long,
+    ): android.app.Notification {
+        ensureChannel(context)
         val open = PendingIntent.getActivity(
-            activity,
+            context,
             0,
-            Intent(activity, MainActivity::class.java).apply {
+            Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val color = if (focusPhase) 0xFFDC2626.toInt() else 0xFF2563EB.toInt()
-        val content = RemoteViews(activity.packageName, R.layout.notification_pomodoro_timer).apply {
-            setTextViewText(R.id.pomodoro_timer_clock, clock)
+        val runningCountdown = !paused && endsAtMs > System.currentTimeMillis()
+        val content = RemoteViews(context.packageName, R.layout.notification_pomodoro_timer).apply {
+            if (runningCountdown) {
+                val base = SystemClock.elapsedRealtime() + (endsAtMs - System.currentTimeMillis())
+                setChronometerCountDown(R.id.pomodoro_timer_clock, true)
+                setChronometer(R.id.pomodoro_timer_clock, base, null, true)
+            } else {
+                setChronometerCountDown(R.id.pomodoro_timer_clock, false)
+                setChronometer(R.id.pomodoro_timer_clock, 0, null, false)
+                setTextViewText(R.id.pomodoro_timer_clock, clock)
+            }
             setTextColor(R.id.pomodoro_timer_clock, color)
         }
-        val builder = NotificationCompat.Builder(activity, CHANNEL_ID)
+        return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setCustomContentView(content)
             .setCustomBigContentView(content)
@@ -123,12 +373,28 @@ object PomodoroAndroid {
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-        NotificationManagerCompat.from(activity).notify(NOTIFICATION_ID, builder.build())
+            .build()
+    }
+
+    private fun resolveEndsAtMs(clock: String, endsAtMs: Long, paused: Boolean): Long {
+        if (paused) return 0L
+        if (endsAtMs > 0L) return endsAtMs
+        val seconds = parseClockSeconds(clock) ?: return 0L
+        if (seconds <= 0) return 0L
+        return System.currentTimeMillis() + seconds * 1000L
+    }
+
+    private fun parseClockSeconds(clock: String): Int? {
+        val parts = clock.trim().split(":")
+        if (parts.size != 2) return null
+        val minutes = parts[0].toIntOrNull() ?: return null
+        val seconds = parts[1].toIntOrNull() ?: return null
+        return minutes * 60 + seconds
     }
 
     @JvmStatic
-    fun clearTimerNotification(activity: Activity) {
-        NotificationManagerCompat.from(activity).cancel(NOTIFICATION_ID)
+    fun clearTimerNotification(context: Context) {
+        NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
     }
 
     private fun ensureChannel(context: Context) {

@@ -11,8 +11,9 @@ use crate::system_config::{
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex as SyncGate;
-#[cfg(target_os = "macos")]
+use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, State};
 #[cfg(desktop)]
@@ -20,6 +21,27 @@ use tauri_plugin_autostart::ManagerExt;
 
 /// Only one sync runs at a time; concurrent callers block until it finishes.
 static SYNC_GATE: SyncGate<()> = SyncGate::new(());
+
+/// Bumped when a newer sync should replace the in-flight one (`preempt_data_sync`).
+static SYNC_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+pub const SYNC_CANCELLED: &str = "SYNC_CANCELLED";
+
+fn begin_sync_generation() -> u64 {
+    SYNC_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+fn check_sync_generation(my_gen: u64) -> Result<(), String> {
+    if SYNC_GENERATION.load(Ordering::SeqCst) != my_gen {
+        return Err(SYNC_CANCELLED.into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn preempt_data_sync() {
+    let _ = begin_sync_generation();
+}
 
 fn checkpoint_db(conn: &rusqlite::Connection) -> Result<(), String> {
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
@@ -37,8 +59,9 @@ fn copy_db_file(src: &Path, dest_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn run_git(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+fn run_git(cwd: &Path, args: &[&str], my_gen: u64) -> Result<String, String> {
+    check_sync_generation(my_gen)?;
+    let mut child = Command::new("git")
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -47,8 +70,24 @@ fn run_git(cwd: &Path, args: &[&str]) -> Result<String, String> {
         .env("GCM_INTERACTIVE", "Never")
         .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         .env("GIT_EDITOR", "true")
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("无法执行 git（请确认已安装）: {e}"))?;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                check_sync_generation(my_gen)?;
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("git {} 失败: {e}", args.join(" "))),
+        }
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("git {} 失败: {e}", args.join(" ")))?;
+    check_sync_generation(my_gen)?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() {
@@ -88,78 +127,35 @@ fn sync_local(db_path: &Path, backup_dir: &str) -> Result<(), String> {
     copy_db_file(db_path, &dest)
 }
 
-const DB_PRESERVE_DIR: &str = ".abyss-db-preserve";
-const DB_SIDECAR: [&str; 3] = ["abyss.db-wal", "abyss.db-shm", "abyss.db-journal"];
-
-fn preserve_local_db(data_dir: &Path, db_path: &Path) -> Result<(), String> {
-    if !db_path.is_file() {
-        return Ok(());
-    }
-    let stash = data_dir.join(DB_PRESERVE_DIR);
-    fs::create_dir_all(&stash).map_err(|e| e.to_string())?;
-    fs::copy(db_path, stash.join("abyss.db")).map_err(|e| e.to_string())?;
-    for name in DB_SIDECAR {
-        let side = data_dir.join(name);
-        if side.is_file() {
-            fs::copy(&side, stash.join(name)).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn restore_local_db(data_dir: &Path, db_path: &Path) -> Result<(), String> {
-    let stash = data_dir.join(DB_PRESERVE_DIR);
-    let backup = stash.join("abyss.db");
-    if backup.is_file()
-        && (!db_path.is_file()
-            || fs::metadata(&backup)
-                .map(|m| m.len())
-                .unwrap_or(0)
-                >= fs::metadata(db_path).map(|m| m.len()).unwrap_or(0))
-    {
-        if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        fs::copy(&backup, db_path).map_err(|e| e.to_string())?;
-    }
-    for name in DB_SIDECAR {
-        let backup_side = stash.join(name);
-        if backup_side.is_file() {
-            fs::copy(&backup_side, data_dir.join(name)).map_err(|e| e.to_string())?;
-        }
-    }
-    let _ = fs::remove_dir_all(&stash);
-    Ok(())
-}
-
-fn git_pull(data_dir: &Path, db_path: &Path) -> Result<(), String> {
+fn git_pull(data_dir: &Path, my_gen: u64) -> Result<(), String> {
     ensure_git_repo(data_dir)?;
-    preserve_local_db(data_dir, db_path)?;
-    let branch = run_git(data_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?
+    let branch = run_git(data_dir, &["rev-parse", "--abbrev-ref", "HEAD"], my_gen)?
         .trim()
         .to_string();
     if branch.is_empty() || branch == "HEAD" {
         return Err("无法识别当前 git 分支".into());
     }
-    run_git(data_dir, &["fetch", "origin"]).map_err(map_git_pull_err)?;
-    let pull = run_git(data_dir, &["reset", "--hard", &format!("origin/{branch}")])
-        .map(|_| ())
-        .map_err(map_git_pull_err);
-    restore_local_db(data_dir, db_path)?;
-    pull
+    run_git(data_dir, &["fetch", "origin"], my_gen).map_err(map_git_pull_err)?;
+    run_git(
+        data_dir,
+        &["reset", "--hard", &format!("origin/{branch}")],
+        my_gen,
+    )
+    .map(|_| ())
+    .map_err(map_git_pull_err)
 }
 
-fn git_push_logical(data_dir: &Path, message: &str) -> Result<(), String> {
-    run_git(data_dir, &["add", "sync", ".gitignore"])?;
-    let status = run_git(data_dir, &["status", "--porcelain"])?;
+fn git_push_logical(data_dir: &Path, message: &str, my_gen: u64) -> Result<(), String> {
+    run_git(data_dir, &["add", "sync", ".gitignore"], my_gen)?;
+    let status = run_git(data_dir, &["status", "--porcelain"], my_gen)?;
     if !status.is_empty() {
-        match run_git(data_dir, &["commit", "-m", message]) {
+        match run_git(data_dir, &["commit", "-m", message], my_gen) {
             Ok(_) => {}
             Err(e) if e.contains("nothing to commit") => {}
             Err(e) => return Err(e),
         }
     }
-    run_git(data_dir, &["push"])
+    run_git(data_dir, &["push"], my_gen)
         .map(|_| ())
         .map_err(map_git_push_err)
 }
@@ -195,12 +191,20 @@ fn map_git_push_err(e: String) -> String {
     }
 }
 
-fn merge_and_export_logical(conn: &mut Connection, data_dir: &Path, db_path: &Path) -> Result<(), String> {
+fn merge_and_export_logical(
+    conn: &mut Connection,
+    data_dir: &Path,
+    db_path: &Path,
+    my_gen: u64,
+) -> Result<(), String> {
+    check_sync_generation(my_gen)?;
     *conn = open_db(db_path).map_err(|e| format!("拉取后打开数据库失败: {e}"))?;
     checkpoint_db(conn)?;
     import_logical(conn, data_dir)?;
+    check_sync_generation(my_gen)?;
     checkpoint_db(conn)?;
     export_logical(conn, data_dir)?;
+    check_sync_generation(my_gen)?;
     ensure_data_gitignore(data_dir)?;
     untrack_database_from_git(data_dir)?;
     Ok(())
@@ -497,11 +501,13 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
     let message = settings.git_commit_message.clone();
     let backup = settings.local_backup_dir.clone();
 
+    let my_gen = begin_sync_generation();
     let app_for_sync = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let _gate = SYNC_GATE
             .lock()
             .map_err(|e| format!("同步锁失败: {e}"))?;
+        check_sync_generation(my_gen)?;
         let state = app_for_sync.state::<DbState>();
         let db_path = {
             let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -513,6 +519,7 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
             checkpoint_db(&conn)?;
             db_path
         };
+        check_sync_generation(my_gen)?;
         let sync_result = match method {
             SyncMethod::Local => {
                 let backup = backup.as_deref().unwrap_or("");
@@ -523,12 +530,12 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
                     .parent()
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| db_path.clone());
-                git_pull(&data_dir, &db_path)?;
+                git_pull(&data_dir, my_gen)?;
                 {
                     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-                    merge_and_export_logical(&mut conn, &data_dir, &db_path)?;
+                    merge_and_export_logical(&mut conn, &data_dir, &db_path, my_gen)?;
                 }
-                git_push_logical(&data_dir, &message)
+                git_push_logical(&data_dir, &message, my_gen)
             }
         };
         sync_result

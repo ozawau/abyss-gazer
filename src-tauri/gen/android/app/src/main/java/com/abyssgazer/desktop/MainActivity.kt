@@ -128,6 +128,16 @@ class MainActivity : TauriActivity() {
     notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
   }
 
+  override fun onPause() {
+    webView?.post {
+      webView?.evaluateJavascript(
+        "window.dispatchEvent(new Event('abyss-background'))",
+        null,
+      )
+    }
+    super.onPause()
+  }
+
   override fun onResume() {
     super.onResume()
     CheckinWidgetProvider.refresh(this)

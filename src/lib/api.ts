@@ -402,6 +402,17 @@ export function runDataSync(): Promise<void> {
   return invoke("run_data_sync");
 }
 
+/** Invalidate the in-flight desktop sync so a newer run can start (see `SYNC_CANCELLED`). */
+export function preemptDataSync(): Promise<void> {
+  return invoke("preempt_data_sync");
+}
+
+export const SYNC_CANCELLED = "SYNC_CANCELLED";
+
+export function isSyncCancelled(err: unknown): boolean {
+  return String(err).includes(SYNC_CANCELLED);
+}
+
 export function reopenDatabase(): Promise<void> {
   return invoke("reopen_database");
 }

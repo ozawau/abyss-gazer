@@ -185,6 +185,21 @@ fn collect_descendant_ids(
     Ok(ids)
 }
 
+fn complete_descendants(
+    conn: &rusqlite::Connection,
+    root_id: &str,
+    updated_at: i64,
+) -> Result<(), String> {
+    for id in collect_descendant_ids(conn, root_id)? {
+        conn.execute(
+            "UPDATE tasks SET status = 'done', completed_at = COALESCE(completed_at, ?1), updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![updated_at, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn cascade_field(
     conn: &rusqlite::Connection,
     root_id: &str,
@@ -440,6 +455,10 @@ pub fn update_task(
     )
     .map_err(|e| e.to_string())?;
 
+    if status == "done" && previous_status != "done" {
+        complete_descendants(&conn, &input.id, updated_at)?;
+    }
+
     if !is_subtask && category_changed {
         let value = match &category_id {
             Some(id) => rusqlite::types::Value::Text(id.clone()),
@@ -659,9 +678,44 @@ pub fn get_task(db: State<'_, DbState>, id: String) -> Result<Task, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::fetch_task;
+    use super::{complete_descendants, fetch_task};
     use crate::db::open_db;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn marking_parent_done_completes_descendants() {
+        let path = std::env::temp_dir().join(format!(
+            "abyss-gazer-cascade-done-{}.db",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let conn = open_db(&path).expect("open");
+        conn.execute_batch(
+            "INSERT INTO tasks (id, title, notes, status, priority, sort_order, parent_id, created_at, updated_at)
+             VALUES
+               ('p', 'Parent', '', 'todo', 'medium', 0, NULL, 1, 1),
+               ('c', 'Child', '', 'todo', 'medium', 0, 'p', 1, 1),
+               ('g', 'Grand', '', 'todo', 'medium', 0, 'c', 1, 1);",
+        )
+        .expect("seed");
+
+        conn.execute(
+            "UPDATE tasks SET status = 'done', completed_at = 99, updated_at = 99 WHERE id = 'p'",
+            [],
+        )
+        .expect("complete parent");
+        complete_descendants(&conn, "p", 99).expect("cascade");
+
+        for id in ["c", "g"] {
+            let status: String = conn
+                .query_row("SELECT status FROM tasks WHERE id = ?1", [id], |r| r.get(0))
+                .expect("status");
+            assert_eq!(status, "done", "task {id}");
+        }
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn completed_pomodoros_include_descendants() {

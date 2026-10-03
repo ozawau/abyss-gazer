@@ -35,3 +35,4 @@
 -keep class com.abyssgazer.desktop.NoteTaskWidgetProvider { *; }
 -keep class com.abyssgazer.desktop.NoteTaskInputActivity { *; }
 -keep class com.abyssgazer.desktop.PomodoroAndroid { *; }
+-keep class com.abyssgazer.desktop.PomodoroTimerForegroundService { *; }

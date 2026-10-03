@@ -30,6 +30,7 @@ import {
   deleteTask,
   listCategories,
   listFocusCountsSince,
+  listTasks,
   reparentTask,
   reorderTask,
   startOfLocalDayMs,
@@ -699,11 +700,16 @@ export function TasksView({
     setBusy(true);
     setError(null);
     try {
+      const markingDone = task.status === "todo";
       const next = await updateTask({
         id: task.id,
-        status: task.status === "todo" ? "done" : "todo",
+        status: markingDone ? "done" : "todo",
       });
-      onTasksChange(tasks.map((t) => (t.id === next.id ? next : t)));
+      if (markingDone) {
+        onTasksChange(await listTasks());
+      } else {
+        onTasksChange(tasks.map((t) => (t.id === next.id ? next : t)));
+      }
     } catch (err) {
       setError(String(err));
     } finally {
