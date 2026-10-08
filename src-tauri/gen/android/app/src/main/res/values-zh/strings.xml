@@ -19,4 +19,7 @@
     <string name="pomodoro_notification_channel">番茄钟计时</string>
     <string name="pomodoro_notification_channel_desc">专注或休息计时时在通知栏显示剩余时间</string>
     <string name="pomodoro_notification_paused">已暂停</string>
+    <string name="pomodoro_notification_focus">专注</string>
+    <string name="pomodoro_notification_break">休息</string>
+    <string name="pomodoro_overlay_permission_hint">请在设置中允许「显示在其他应用上层」，以便切到其他应用时仍能看到番茄倒计时。</string>
 </resources>

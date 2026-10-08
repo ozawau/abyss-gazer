@@ -3,7 +3,8 @@ export type ViewId =
   | "tasks"
   | "pomodoro"
   | "calendar"
-  | "gantt";
+  | "gantt"
+  | "statistics";
 
 export interface NavItem {
   id: ViewId;
@@ -19,4 +20,5 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "pomodoro", label: "番茄钟", enabled: true },
   { id: "calendar", label: "日历", enabled: true },
   { id: "gantt", label: "甘特图", enabled: true },
+  { id: "statistics", label: "统计", enabled: true },
 ];

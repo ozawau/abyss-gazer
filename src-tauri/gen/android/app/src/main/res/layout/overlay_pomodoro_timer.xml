@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/pomodoro_overlay_root"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/overlay_pomodoro_bg"
+    android:elevation="8dp"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+
+    <TextView
+        android:id="@+id/pomodoro_overlay_clock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical|start"
+        android:fontFamily="monospace"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.02" />
+</FrameLayout>

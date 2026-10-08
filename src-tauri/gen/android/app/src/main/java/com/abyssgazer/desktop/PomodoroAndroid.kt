@@ -134,6 +134,7 @@ object PomodoroAndroid {
             PomodoroTimerPrefs.clear(context)
             PomodoroTimerForegroundService.stop(context)
             clearTimerNotification(context)
+            PomodoroTimerOverlay.sync(context, false, false, 0L, true, "")
             return
         }
         if (!canPostNotifications(context)) return
@@ -160,6 +161,7 @@ object PomodoroAndroid {
             )
             PomodoroTimerForegroundService.start(context, existing.endsAtMs, existing.focusUi, displayClock)
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            PomodoroTimerOverlay.sync(context, true, false, existing.endsAtMs, existing.focusUi, displayClock)
             return
         }
         if (
@@ -181,6 +183,7 @@ object PomodoroAndroid {
             )
             PomodoroTimerForegroundService.start(context, existing.endsAtMs, true, displayClock)
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            PomodoroTimerOverlay.sync(context, true, false, existing.endsAtMs, true, displayClock)
             return
         }
         PomodoroTimerPrefs.save(
@@ -215,6 +218,7 @@ object PomodoroAndroid {
             PomodoroTimerForegroundService.stop(context)
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
         }
+        PomodoroTimerOverlay.sync(context, active, paused, endsAt, focusPhase, displayClock)
     }
 
     internal fun onTimerAlarm(context: Context) {
@@ -294,6 +298,7 @@ object PomodoroAndroid {
                 clearTimerNotification(context)
             }
         }
+        PomodoroTimerOverlay.refreshFromStoredState(context)
     }
 
     private fun scheduleTimerAlarm(context: Context, endsAtMs: Long) {
@@ -370,6 +375,7 @@ object PomodoroAndroid {
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setShowWhen(false)
+            .setColorized(false)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)

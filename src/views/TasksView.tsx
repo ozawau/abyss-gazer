@@ -316,6 +316,7 @@ export function TasksView({
   const hoverPos = useRef({ x: 0, y: 0 });
   const hoverAnchor = useRef<DOMRect | null>(null);
   const hoverCardRef = useRef<HTMLDivElement>(null);
+  const hoverHideTimer = useRef<number | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
@@ -855,17 +856,26 @@ export function TasksView({
     setCreateFor(null);
   }
 
-  function showTaskHover(id: string, x: number, y: number) {
-    if (dragRef.current) return;
-    hoverPos.current = { x, y };
-    setHoverTaskId((prev) => (prev === id ? prev : id));
-    placeTaskHoverCard(hoverCardRef.current, x, y);
+  function cancelHoverHide() {
+    if (hoverHideTimer.current == null) return;
+    window.clearTimeout(hoverHideTimer.current);
+    hoverHideTimer.current = null;
   }
 
-  function moveTaskHover(id: string, x: number, y: number) {
+  function scheduleHoverHide() {
+    cancelHoverHide();
+    hoverHideTimer.current = window.setTimeout(() => {
+      hoverHideTimer.current = null;
+      setHoverTaskId(null);
+    }, 280);
+  }
+
+  function showTaskHover(id: string, x: number, y: number) {
     if (dragRef.current) return;
+    cancelHoverHide();
+    if (hoverTaskId === id) return;
     hoverPos.current = { x, y };
-    setHoverTaskId((prev) => (prev === id ? prev : id));
+    setHoverTaskId(id);
     placeTaskHoverCard(hoverCardRef.current, x, y);
   }
 
@@ -1063,18 +1073,18 @@ export function TasksView({
                       ? undefined
                       : (e) => showTaskHover(task.id, e.clientX, e.clientY)
                   }
-                  onMouseMove={
-                    android
-                      ? undefined
-                      : (e) => moveTaskHover(task.id, e.clientX, e.clientY)
-                  }
                   onMouseLeave={
                     android
                       ? undefined
                       : (e) => {
                           const next = e.relatedTarget;
-                          if (next instanceof Element && next.closest(".task-row")) return;
-                          setHoverTaskId(null);
+                          if (
+                            next instanceof Element &&
+                            next.closest(".task-hover-card, .task-row")
+                          ) {
+                            return;
+                          }
+                          scheduleHoverHide();
                         }
                   }
                   onDoubleClick={(e) => {
@@ -1206,12 +1216,16 @@ export function TasksView({
     : null;
   useLayoutEffect(() => {
     if (!hoverTask) return;
+    const card = hoverCardRef.current;
+    if (card) card.scrollTop = 0;
     if (android && hoverAnchor.current) {
-      placeAnchoredTaskCard(hoverCardRef.current, hoverAnchor.current);
+      placeAnchoredTaskCard(card, hoverAnchor.current);
     } else {
-      placeTaskHoverCard(hoverCardRef.current, hoverPos.current.x, hoverPos.current.y);
+      placeTaskHoverCard(card, hoverPos.current.x, hoverPos.current.y);
     }
-  }, [hoverTask, android]);
+  }, [hoverTaskId, android]);
+
+  useEffect(() => () => cancelHoverHide(), []);
 
   useEffect(() => {
     if (!android || !hoverTaskId) return;
@@ -1402,6 +1416,8 @@ export function TasksView({
           }
           pinned={android}
           onDismiss={() => setHoverTaskId(null)}
+          onHoverStart={android ? undefined : cancelHoverHide}
+          onHoverEnd={android ? undefined : scheduleHoverHide}
         />
       )}
 
@@ -1600,6 +1616,8 @@ function TaskHoverCard({
   category,
   pinned,
   onDismiss,
+  onHoverStart,
+  onHoverEnd,
 }: {
   cardRef: RefObject<HTMLDivElement | null>;
   task: Task;
@@ -1607,6 +1625,8 @@ function TaskHoverCard({
   category: Category | null;
   pinned: boolean;
   onDismiss: () => void;
+  onHoverStart?: () => void;
+  onHoverEnd?: () => void;
 }) {
   const { locale, t } = useI18n();
   useDismissOnAndroidBack(pinned, onDismiss, cardRef);
@@ -1616,6 +1636,12 @@ function TaskHoverCard({
       ref={cardRef}
       className={`task-hover-card${pinned ? " is-pinned" : ""}`}
       role="tooltip"
+      onMouseEnter={onHoverStart}
+      onMouseLeave={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Element && next.closest(".task-row")) return;
+        onHoverEnd?.();
+      }}
     >
       <strong>{task.title}</strong>
       {parents.length > 0 && (

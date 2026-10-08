@@ -21,8 +21,8 @@ import { type GanttActivityMode } from "./lib/gantt";
 import { syncPomodoroPresence } from "./lib/pomodoroPresence";
 import { type PomodoroTick } from "./lib/pomodoroTimer";
 import { NAV_ITEMS, ViewId } from "./lib/nav";
-import { ANDROID_BACK_EVENT, dismissTopAndroidPopup } from "./lib/androidBack";
-import { configureDataSync, runSyncCycle } from "./lib/dataSync";
+import { ANDROID_BACK_EVENT, dismissTopAndroidPopup, useDismissOnAndroidBack } from "./lib/androidBack";
+import { cancelActiveSync, configureDataSync, runSyncCycle } from "./lib/dataSync";
 import { notifyLocalTodayRefresh } from "./lib/useLocalToday";
 import { isAndroidDevice, useNarrowViewport } from "./lib/viewport";
 import { formatTaskLineage, taskById } from "./lib/taskTree";
@@ -35,6 +35,7 @@ import { PomodoroView } from "./views/PomodoroView";
 import { CategoryFilter, TasksView } from "./views/TasksView";
 import { UpcomingTasksView } from "./views/UpcomingTasksView";
 import { TrayCalendar } from "./views/TrayCalendar";
+import { StatisticsView } from "./views/StatisticsView";
 import "./styles/app.css";
 
 function isTrayCalendarWindow(): boolean {
@@ -77,6 +78,7 @@ function MainApp() {
     }
   }, []);
   const [activeView, setActiveView] = useState<ViewId>("checkin");
+  const [statisticsTab, setStatisticsTab] = useState<"statistics" | "gantt">("statistics");
   useEffect(() => {
     const openCheckin = () => setActiveView("checkin");
     const win = window as Window & {
@@ -127,6 +129,9 @@ function MainApp() {
   const [calendarCategoryFilter, setCalendarCategoryFilter] =
     useState<CategoryFilter>("all");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cancelSyncOpen, setCancelSyncOpen] = useState(false);
+  const cancelSyncRef = useRef<HTMLDivElement>(null);
+  useDismissOnAndroidBack(cancelSyncOpen, () => setCancelSyncOpen(false), cancelSyncRef);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const systemReady = useRef(false);
   const [pomodoroSettings, setPomodoroSettings] = useState<PomodoroSettings>(
@@ -238,6 +243,8 @@ function MainApp() {
     () => ({
       success: t("settings.syncToastOk"),
       failure: (detail: string) => t("settings.syncToastFail", { detail }),
+      stopped: t("syncStopped"),
+      disabled: t("nav.syncDisabled"),
     }),
     [t],
   );
@@ -284,6 +291,15 @@ function MainApp() {
   }, [pomodoroTask, selectedTask, tasksById]);
 
   const narrow = useNarrowViewport();
+  const androidNarrow = narrow && isAndroidDevice();
+  const navigationItems = useMemo(() => {
+    if (!androidNarrow) return NAV_ITEMS;
+    // The compact Android navigation has one slot for the statistics hub:
+    // keep it where Gantt used to be and expose Gantt as an inner tab.
+    return NAV_ITEMS
+      .filter((item) => item.id !== "statistics")
+      .map((item) => item.id === "gantt" ? { ...item, id: "statistics" as ViewId, label: "统计" } : item);
+  }, [androidNarrow]);
   const showTasksSubNav =
     activeView === "tasks" && (narrow || !!subNavOpen.tasks);
   const sidebarCollapsed = !narrow && !sidebarOpen;
@@ -343,6 +359,7 @@ function MainApp() {
   function handleNavigate(id: ViewId) {
     setActiveView(id);
     rememberView(id);
+    if (id === "statistics" && androidNarrow) setStatisticsTab("statistics");
     if (id === "tasks") {
       setTasksSubPage("active");
       rememberTaskPage("active");
@@ -450,13 +467,14 @@ function MainApp() {
     >
       {!immersivePomodoro && (
         <Sidebar
-          items={NAV_ITEMS}
+          items={navigationItems}
           activeView={activeView}
           onNavigate={handleNavigate}
           selectedTaskTitle={currentTaskTitle}
           subNavOpen={subNavOpen}
           onToggleSubNav={handleToggleSubNav}
           onOpenSettings={() => setSettingsOpen(true)}
+          onRequestCancelSync={() => setCancelSyncOpen(true)}
           onToggleSidebar={handleToggleSidebar}
           collapsed={sidebarCollapsed}
           pomodoroTick={pomodoroTick}
@@ -550,6 +568,60 @@ function MainApp() {
             />
           </ViewSlot>
         )}
+        {mountedViews.has("statistics") && (
+          <ViewSlot active={activeView === "statistics"}>
+            {androidNarrow ? (
+              <div className="statistics-mobile-hub">
+                <div className="statistics-tabs" role="tablist" aria-label={t("statistics.title")}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={statisticsTab === "statistics"}
+                    className={statisticsTab === "statistics" ? "is-active" : ""}
+                    onClick={() => setStatisticsTab("statistics")}
+                  >
+                    {t("statistics.title")}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={statisticsTab === "gantt"}
+                    className={statisticsTab === "gantt" ? "is-active" : ""}
+                    onClick={() => setStatisticsTab("gantt")}
+                  >
+                    {t("gantt.title")}
+                  </button>
+                </div>
+                {statisticsTab === "statistics" ? (
+                  <StatisticsView
+                    tasks={tasks}
+                    systemSettings={systemSettings}
+                    dataEpoch={dataEpoch}
+                  />
+                ) : (
+                  <GanttView
+                    tasks={tasks}
+                    selectedTaskId={selectedTaskId}
+                    onSelectTask={handleSelectTask}
+                    onStartPomodoro={startPomodoroForTask}
+                    weekStartsOn={systemSettings.weekStartsOn}
+                    activityMode={systemSettings.ganttActivityMode}
+                    onActivityModeChange={handleGanttActivityModeChange}
+                    categoryFilter={ganttCategoryFilter}
+                    onCategoryFilterChange={setGanttCategoryFilter}
+                    dataEpoch={dataEpoch}
+                  />
+                )}
+              </div>
+            ) : (
+              <StatisticsView
+                tasks={tasks}
+                systemSettings={systemSettings}
+                dataEpoch={dataEpoch}
+              />
+            )}
+          </ViewSlot>
+        )}
         <div
           className={
             activeView === "pomodoro" ? "view-slot" : "view-slot is-hidden"
@@ -588,6 +660,45 @@ function MainApp() {
           />
         </div>
       </main>
+
+      {cancelSyncOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setCancelSyncOpen(false)}
+        >
+          <div
+            ref={cancelSyncRef}
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cancel-sync-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="cancel-sync-title">{t("nav.cancelSyncTitle")}</h2>
+            <p>{t("nav.cancelSyncBody")}</p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => setCancelSyncOpen(false)}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={() => {
+                  cancelActiveSync();
+                  setCancelSyncOpen(false);
+                }}
+              >
+                {t("common.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SettingsDialog
         open={settingsOpen}

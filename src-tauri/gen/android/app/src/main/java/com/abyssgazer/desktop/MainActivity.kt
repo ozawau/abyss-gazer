@@ -135,11 +135,13 @@ class MainActivity : TauriActivity() {
         null,
       )
     }
+    PomodoroTimerOverlay.onAppBackgrounded(this)
     super.onPause()
   }
 
   override fun onResume() {
     super.onResume()
+    PomodoroTimerOverlay.onAppForegrounded()
     CheckinWidgetProvider.refresh(this)
     NoteTaskWidgetProvider.refresh(this)
     if (!sawResume) {

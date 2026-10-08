@@ -20,4 +20,7 @@
     <string name="pomodoro_notification_channel">Pomodoro timer</string>
     <string name="pomodoro_notification_channel_desc">Shows focus and break countdown while timing</string>
     <string name="pomodoro_notification_paused">Paused</string>
+    <string name="pomodoro_notification_focus">Focus</string>
+    <string name="pomodoro_notification_break">Break</string>
+    <string name="pomodoro_overlay_permission_hint">Allow display over other apps to keep the pomodoro countdown visible while you switch apps.</string>
 </resources>
