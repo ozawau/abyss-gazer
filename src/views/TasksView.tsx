@@ -7,7 +7,6 @@ import {
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
-  type RefObject,
 } from "react";
 import { CategoryDialog } from "../components/CategoryDialog";
 import { CategoryPicker } from "../components/CategoryPicker";
@@ -18,6 +17,11 @@ import {
 import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { ReparentTaskDialog } from "../components/ReparentTaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
+import {
+  placeAnchoredTaskCard,
+  placeTaskHoverCard,
+  TaskHoverCard,
+} from "../components/TaskHoverCard";
 import { TaskRowMenu, type TaskMoveAction } from "../components/TaskRowMenu";
 import { useI18n } from "../components/LocaleProvider";
 import { useDismissOnAndroidBack } from "../lib/androidBack";
@@ -52,6 +56,12 @@ import {
   type CategoryFilter,
 } from "../lib/categoryFilter";
 import { dayKey } from "../lib/calendar";
+import {
+  isInTemplateTree,
+  latestInstanceCreatedAt,
+  parseTaskRecurrence,
+  recurrenceLabel,
+} from "../lib/taskRecurrence";
 import { useLocalToday } from "../lib/useLocalToday";
 import { isAndroidDevice } from "../lib/viewport";
 import {
@@ -98,6 +108,9 @@ interface TasksViewProps {
   onSelectTask: (id: string | null) => void;
   onTasksChange: (tasks: Task[]) => void;
   onStartPomodoro: (taskId: string) => void;
+  onOpenTemplate?: (templateId: string) => void;
+  focusTaskId?: string | null;
+  mode?: "active" | "templates";
   categoryFilter: CategoryFilter;
   onCategoryFilterChange: (filter: CategoryFilter) => void;
   dataEpoch: number;
@@ -296,6 +309,9 @@ export function TasksView({
   onSelectTask,
   onTasksChange,
   onStartPomodoro,
+  onOpenTemplate,
+  focusTaskId,
+  mode = "active",
   categoryFilter,
   onCategoryFilterChange,
   dataEpoch,
@@ -402,20 +418,53 @@ export function TasksView({
     return map;
   }, [categories]);
 
-  const openTodoTasks = useMemo(
-    () => tasks.filter((task) => task.status !== "done"),
-    [tasks],
+  const tasksById = useMemo(() => taskById(tasks), [tasks]);
+  const scopedTasks = useMemo(
+    () =>
+      tasks.filter(
+        (task) => isInTemplateTree(task, tasksById) === (mode === "templates"),
+      ),
+    [tasks, tasksById, mode],
+  );
+
+  useEffect(() => {
+    if (mode !== "templates" || !focusTaskId) return;
+    const task = tasksById.get(focusTaskId);
+    if (!task) return;
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      let current: Task | undefined = task;
+      while (current?.parent_id) {
+        next.add(current.parent_id);
+        current = tasksById.get(current.parent_id);
+      }
+      return next;
+    });
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .querySelector(`[data-task-id="${focusTaskId}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [mode, focusTaskId, tasksById]);
+
+  const categorySource = useMemo(
+    () =>
+      mode === "templates"
+        ? scopedTasks
+        : scopedTasks.filter((task) => task.status !== "done"),
+    [scopedTasks, mode],
   );
 
   const categoryHasOpenTodos = useMemo(() => {
     const ids = new Set<string>();
-    for (const task of openTodoTasks) {
+    for (const task of categorySource) {
       if (task.category_id) ids.add(task.category_id);
     }
     return ids;
-  }, [openTodoTasks]);
+  }, [categorySource]);
 
-  const showUncategorizedFilter = openTodoTasks.some((task) => !task.category_id);
+  const showUncategorizedFilter = categorySource.some((task) => !task.category_id);
 
   useEffect(() => {
     if (!showUncategorizedFilter && categoryFilter === "none") {
@@ -442,14 +491,15 @@ export function TasksView({
   const filteredTasks = useMemo(() => {
     const byCategory =
       categoryFilter === "all"
-        ? tasks
+        ? scopedTasks
         : categoryFilter === "none"
-          ? tasks.filter((t) => !t.category_id)
-          : tasks.filter((t) => t.category_id === categoryFilter);
+          ? scopedTasks.filter((t) => !t.category_id)
+          : scopedTasks.filter((t) => t.category_id === categoryFilter);
+    if (mode === "templates") return byCategory;
     return byCategory.filter(
       (t) => t.status === "done" || isTaskStarted(t, nowMs),
     );
-  }, [tasks, categoryFilter, nowMs]);
+  }, [scopedTasks, categoryFilter, nowMs, mode]);
 
   const dayHeader = useMemo(() => {
     const now = new Date();
@@ -493,14 +543,13 @@ export function TasksView({
     };
   }, [filteredTasks, todayFocusByTask]);
 
-  const boardTasks = useMemo(
-    () =>
-      withAncestors(
-        filteredTasks.filter((task) => task.status !== "done"),
-        tasks,
-      ),
-    [filteredTasks, tasks],
-  );
+  const boardTasks = useMemo(() => {
+    const visible =
+      mode === "templates"
+        ? filteredTasks
+        : filteredTasks.filter((task) => task.status !== "done");
+    return withAncestors(visible, scopedTasks);
+  }, [filteredTasks, scopedTasks, mode]);
 
   const collapsedIds = useMemo(() => {
     const ids = childIdSet(boardTasks);
@@ -514,7 +563,10 @@ export function TasksView({
       medium: [],
       low: [],
     };
-    const roots = boardTasks.filter((task) => !task.parent_id);
+    const present = new Set(boardTasks.map((task) => task.id));
+    const roots = boardTasks.filter(
+      (task) => !task.parent_id || !present.has(task.parent_id),
+    );
     for (const group of PRIORITY_GROUPS) {
       const groupRoots = roots.filter(
         (task) => (normalizePriority(task.priority) ?? "medium") === group.id,
@@ -625,6 +677,7 @@ export function TasksView({
       });
       onTasksChange([task, ...tasks]);
       onSelectTask(task.id);
+      if (mode === "templates") setDetailTask(task);
       setDraft("");
       setDraftEstimate(0);
     } catch (err) {
@@ -796,6 +849,7 @@ export function TasksView({
       notes: input.notes,
       due_at: input.due_at,
       start_at: input.start_at,
+      recurrence: input.recurrence,
     });
     onTasksChange(applyAncestorFields(tasks, next));
     setDetailTask(next);
@@ -1161,6 +1215,25 @@ export function TasksView({
                   </button>
                   <div className="task-main">
                     <span className="task-title-btn">{task.title}</span>
+                    {mode === "templates" && (() => {
+                      const rule = parseTaskRecurrence(task.recurrence);
+                      if (!rule) return null;
+                      const label = recurrenceLabel(rule, locale, t);
+                      const spawnedAt = latestInstanceCreatedAt(task.id, tasks);
+                      const spawned = spawnedAt == null
+                        ? t("tasks.neverSpawned")
+                        : t("tasks.lastSpawned", { time: formatDateTime(spawnedAt, locale) });
+                      return (
+                        <>
+                          <span className="task-recurrence-tag" title={label}>
+                            {label}
+                          </span>
+                          <span className="task-template-spawned" title={spawned}>
+                            {spawned}
+                          </span>
+                        </>
+                      );
+                    })()}
                     {category && (
                       <span className="task-category-tag" title={category.name}>
                         <span
@@ -1175,31 +1248,6 @@ export function TasksView({
                       estimate={task.estimate_pomodoros ?? 0}
                       completed={task.completed_pomodoros ?? 0}
                     />
-                  </div>
-                  <div className="task-actions">
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDetailTask(task);
-                        if (android) setHoverTaskId(null);
-                      }}
-                      disabled={busy}
-                    >
-                      {t("common.edit")}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-btn danger"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPendingDeleteTask(task);
-                      }}
-                      disabled={busy}
-                    >
-                      {t("common.delete")}
-                    </button>
                   </div>
                 </li>
               );
@@ -1242,6 +1290,12 @@ export function TasksView({
 
   return (
     <div className="view tasks-view">
+      {mode === "templates" ? (
+        <header className="view-header">
+          <h1>{t("nav.templates")}</h1>
+          <p>{t("tasks.templatesHint")}</p>
+        </header>
+      ) : (
       <header className="view-header tasks-day-header">
         <div className="tasks-day-title">
           <h1>{dayHeader.date}</h1>
@@ -1277,6 +1331,7 @@ export function TasksView({
           </li>
         </ul>
       </header>
+      )}
 
       <form className="task-create" onSubmit={handleCreate}>
         <input
@@ -1495,6 +1550,17 @@ export function TasksView({
             setDetailTask(rowMenu.task);
             setRowMenu(null);
           }}
+          onOpenTemplate={
+            onOpenTemplate &&
+            rowMenu.task.recurrence_source_id &&
+            tasksById.has(rowMenu.task.recurrence_source_id)
+              ? () => {
+                  const templateId = rowMenu.task.recurrence_source_id;
+                  setRowMenu(null);
+                  if (templateId) onOpenTemplate(templateId);
+                }
+              : undefined
+          }
           onCreateSubtask={() => {
             setSubtaskParent(rowMenu.task);
             setRowMenu(null);
@@ -1574,117 +1640,3 @@ export function TasksView({
   );
 }
 
-function placeAnchoredTaskCard(el: HTMLDivElement | null, anchor: DOMRect) {
-  if (!el) return;
-  const margin = 8;
-  const width = el.offsetWidth;
-  const height = el.offsetHeight;
-  let top = anchor.bottom + 8;
-  if (top + height > window.innerHeight - margin) {
-    top = anchor.top - height - 8;
-  }
-  if (top < margin) top = margin;
-  const left = Math.min(
-    Math.max(margin, anchor.left),
-    Math.max(margin, window.innerWidth - width - margin),
-  );
-  el.style.left = `${left}px`;
-  el.style.top = `${top}px`;
-}
-
-function placeTaskHoverCard(el: HTMLDivElement | null, x: number, y: number) {
-  if (!el) return;
-  const margin = 8;
-  const width = el.offsetWidth;
-  const height = el.offsetHeight;
-  const left = Math.min(
-    Math.max(margin, x + 14),
-    Math.max(margin, window.innerWidth - width - margin),
-  );
-  const top = Math.min(
-    Math.max(margin, y + 16),
-    Math.max(margin, window.innerHeight - height - margin),
-  );
-  el.style.left = `${left}px`;
-  el.style.top = `${top}px`;
-}
-
-function TaskHoverCard({
-  cardRef,
-  task,
-  parents,
-  category,
-  pinned,
-  onDismiss,
-  onHoverStart,
-  onHoverEnd,
-}: {
-  cardRef: RefObject<HTMLDivElement | null>;
-  task: Task;
-  parents: Task[];
-  category: Category | null;
-  pinned: boolean;
-  onDismiss: () => void;
-  onHoverStart?: () => void;
-  onHoverEnd?: () => void;
-}) {
-  const { locale, t } = useI18n();
-  useDismissOnAndroidBack(pinned, onDismiss, cardRef);
-  const notes = task.notes.trim();
-  return (
-    <div
-      ref={cardRef}
-      className={`task-hover-card${pinned ? " is-pinned" : ""}`}
-      role="tooltip"
-      onMouseEnter={onHoverStart}
-      onMouseLeave={(event) => {
-        const next = event.relatedTarget;
-        if (next instanceof Element && next.closest(".task-row")) return;
-        onHoverEnd?.();
-      }}
-    >
-      <strong>{task.title}</strong>
-      {parents.length > 0 && (
-        <p className="task-hover-parents">
-          <span>{t("tasks.parents")}</span>
-          {parents.map((parent) => (
-            <span key={parent.id}>{parent.title}</span>
-          ))}
-        </p>
-      )}
-      <p className="task-hover-category">
-        <span>{t("common.category")}</span>
-        {category ? (
-          <>
-            <span
-              className="category-swatch"
-              style={{ background: category.color }}
-              aria-hidden
-            />
-            <span>{category.name}</span>
-          </>
-        ) : (
-          <span>{t("common.noCategory")}</span>
-        )}
-      </p>
-      <p>
-        {t("clock.progress", {
-          done: formatPomodoroAmount(task.completed_pomodoros ?? 0),
-          estimate: task.estimate_pomodoros ?? 0,
-        })}
-      </p>
-      <p>
-        {t("detail.start")} {formatDateTime(task.start_at, locale)}
-      </p>
-      <p>
-        {t("detail.due")} {formatDateTime(task.due_at, locale)}
-      </p>
-      {notes && (
-        <p>
-          {t("detail.notes")}
-          <span className="task-hover-notes">{notes}</span>
-        </p>
-      )}
-    </div>
-  );
-}

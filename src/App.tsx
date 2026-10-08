@@ -16,7 +16,8 @@ import {
   SystemSettings,
   Task,
 } from "./lib/api";
-import { initCnHolidayData } from "./lib/cnHolidayData";
+import { initCnHolidayData, useCnHolidayRevision } from "./lib/cnHolidayData";
+import { materializeRecurringTasks } from "./lib/taskRecurrence";
 import { type GanttActivityMode } from "./lib/gantt";
 import { syncPomodoroPresence } from "./lib/pomodoroPresence";
 import { type PomodoroTick } from "./lib/pomodoroTimer";
@@ -124,6 +125,9 @@ function MainApp() {
     useState<CategoryFilter>("all");
   const [completedCategoryFilter, setCompletedCategoryFilter] =
     useState<CategoryFilter>("all");
+  const [templatesCategoryFilter, setTemplatesCategoryFilter] =
+    useState<CategoryFilter>("all");
+  const [templateFocusId, setTemplateFocusId] = useState<string | null>(null);
   const [ganttCategoryFilter, setGanttCategoryFilter] =
     useState<CategoryFilter>("all");
   const [calendarCategoryFilter, setCalendarCategoryFilter] =
@@ -147,10 +151,53 @@ function MainApp() {
     return () => window.removeEventListener("abyss-checkin-changed", refresh);
   }, []);
   const tasksLoadGen = useRef(0);
+  const recurrenceSettled = useRef(new Set<string>());
+  const recurrenceRunning = useRef(false);
+  const recurrenceMounted = useRef(true);
+  const holidayRevision = useCnHolidayRevision();
 
   useEffect(() => {
     initCnHolidayData();
   }, []);
+
+  useEffect(() => {
+    recurrenceMounted.current = true;
+    return () => {
+      recurrenceMounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!tasks.some((task) => task.recurrence)) return;
+    const run = () => {
+      if (recurrenceRunning.current) return;
+      recurrenceRunning.current = true;
+      void materializeRecurringTasks(tasks, recurrenceSettled.current)
+        .then(async (outcome) => {
+          for (const key of outcome.settled) recurrenceSettled.current.add(key);
+          if (!recurrenceMounted.current || outcome.created.length === 0) return;
+          const gen = ++tasksLoadGen.current;
+          const rows = await listTasks();
+          if (recurrenceMounted.current && tasksLoadGen.current === gen) setTasks(rows);
+        })
+        .catch(() => {
+          /* The next tick retries days that were not settled. */
+        })
+        .finally(() => {
+          recurrenceRunning.current = false;
+        });
+    };
+    run();
+    const timer = window.setInterval(run, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [tasks, holidayRevision]);
 
   useEffect(() => {
     notifyLocalTodayRefresh();
@@ -373,6 +420,14 @@ function MainApp() {
     rememberTaskPage(page);
   }
 
+  function openRecurrenceTemplate(templateId: string) {
+    setActiveView("tasks");
+    setTasksSubPage("templates");
+    rememberTaskPage("templates");
+    setSelectedTaskId(templateId);
+    setTemplateFocusId(templateId);
+  }
+
   function handleToggleSubNav(id: ViewId) {
     const willOpen = !subNavOpen[id];
     setSubNavOpen((prev) => ({ ...prev, [id]: willOpen }));
@@ -497,6 +552,7 @@ function MainApp() {
               onSelectTask={handleSelectTask}
               onTasksChange={setTasks}
               onStartPomodoro={startPomodoroForTask}
+              onOpenTemplate={openRecurrenceTemplate}
               categoryFilter={tasksCategoryFilter}
               onCategoryFilterChange={setTasksCategoryFilter}
               dataEpoch={dataEpoch}
@@ -510,6 +566,7 @@ function MainApp() {
             <UpcomingTasksView
               tasks={tasks}
               onTasksChange={setTasks}
+              onOpenTemplate={openRecurrenceTemplate}
               categoryFilter={upcomingCategoryFilter}
               onCategoryFilterChange={setUpcomingCategoryFilter}
               dataEpoch={dataEpoch}
@@ -523,8 +580,27 @@ function MainApp() {
             <CompletedTasksView
               tasks={tasks}
               onTasksChange={setTasks}
+              onOpenTemplate={openRecurrenceTemplate}
               categoryFilter={completedCategoryFilter}
               onCategoryFilterChange={setCompletedCategoryFilter}
+              dataEpoch={dataEpoch}
+            />
+          </ViewSlot>
+        )}
+        {mountedTaskPages.has("templates") && (
+          <ViewSlot
+            active={activeView === "tasks" && tasksSubPage === "templates"}
+          >
+            <TasksView
+              mode="templates"
+              tasks={tasks}
+              selectedTaskId={selectedTaskId}
+              onSelectTask={handleSelectTask}
+              onTasksChange={setTasks}
+              onStartPomodoro={startPomodoroForTask}
+              focusTaskId={templateFocusId}
+              categoryFilter={templatesCategoryFilter}
+              onCategoryFilterChange={setTemplatesCategoryFilter}
               dataEpoch={dataEpoch}
             />
           </ViewSlot>

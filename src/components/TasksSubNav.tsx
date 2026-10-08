@@ -6,6 +6,7 @@ const PAGE_LABEL: Record<TasksSubPage, MessageKey> = {
   active: "nav.current",
   upcoming: "nav.upcoming",
   completed: "nav.completed",
+  templates: "nav.templates",
 };
 
 interface TasksSubNavProps {

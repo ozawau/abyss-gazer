@@ -34,6 +34,7 @@ import {
   sessionEffectiveEndMs,
   completedTasksOnDay,
   completedFocusCountOnDay,
+  calendarTasksOnDay,
   countDayActivity,
   dayKey,
   focusSessionsOnDay,
@@ -59,6 +60,7 @@ import {
 } from "../lib/cnStatutoryDay";
 import { formatLunarDayShort, formatShortDate } from "../lib/dateDisplay";
 import { formatPomodoroAmount } from "../lib/pomodoroTimer";
+import { calendarPlansOnDay } from "../lib/taskRecurrence";
 import { formatTaskLineage, leafTasks } from "../lib/taskTree";
 import { useFollowLocalToday, useLocalToday } from "../lib/useLocalToday";
 import { isAndroidDevice, useNarrowViewport } from "../lib/viewport";
@@ -257,18 +259,22 @@ export function CalendarView({
     return map;
   }, [categories]);
 
-  const filteredTasks = useMemo(() => {
-    const leaves = new Set(leafTasks(tasks).map((task) => task.id));
-    return tasks.filter((t) => {
-      if (!leaves.has(t.id)) return false;
-      if (hideDone && t.status === "done") return false;
-      if (categoryFilter === "none") return !t.category_id;
-      if (categoryFilter !== "all" && t.category_id !== categoryFilter) {
-        return false;
-      }
+  const categoryTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      if (categoryFilter === "none") return !task.category_id;
+      if (categoryFilter !== "all" && task.category_id !== categoryFilter) return false;
       return true;
     });
-  }, [tasks, categoryFilter, hideDone]);
+  }, [tasks, categoryFilter]);
+
+  const filteredTasks = useMemo(() => {
+    const leaves = new Set(leafTasks(tasks).map((task) => task.id));
+    return categoryTasks.filter((task) => {
+      if (!leaves.has(task.id)) return false;
+      if (hideDone && task.status === "done") return false;
+      return true;
+    });
+  }, [tasks, categoryTasks, hideDone]);
 
   const taskMap = useMemo(
     () => new Map(tasks.map((task) => [task.id, task])),
@@ -293,10 +299,21 @@ export function CalendarView({
     [sessions, visibleTaskIds],
   );
 
-  const selectedDayScheduled = useMemo(
-    () => scheduledTasksOnDay(scheduledTasks, selectedDay),
-    [scheduledTasks, selectedDay],
+  const selectedDayPlans = useMemo(
+    () => calendarPlansOnDay(categoryTasks, selectedDay, today),
+    [categoryTasks, selectedDay, today],
   );
+
+  const selectedDayScheduled = useMemo(() => {
+    const listed = scheduledTasksOnDay(scheduledTasks, selectedDay);
+    const seen = new Set(listed.map((task) => task.id));
+    return [
+      ...listed,
+      ...selectedDayPlans
+        .map((plan) => plan.task)
+        .filter((task) => !seen.has(task.id)),
+    ];
+  }, [scheduledTasks, selectedDay, selectedDayPlans]);
 
   const selectedDayCompleted = useMemo(
     () => completedTasksOnDay(filteredTasks, selectedDay),
@@ -390,6 +407,7 @@ export function CalendarView({
             today={today}
             selectedDay={selectedDay}
             sessions={visibleSessions}
+            planTasks={categoryTasks}
             taskMap={taskMap}
             categoryMap={categoryMap}
             weekdays={weekdays}
@@ -521,6 +539,7 @@ export function CalendarView({
               today={today}
               selectedDay={selectedDay}
               tasks={filteredTasks}
+              planTasks={categoryTasks}
               sessions={visibleSessions}
               weekStartsOn={weekStartsOn}
               onSelectDay={(day) => selectDay(day, "month")}
@@ -540,6 +559,7 @@ export function CalendarView({
               today={today}
               selectedDay={selectedDay}
               tasks={filteredTasks}
+              planTasks={categoryTasks}
               sessions={visibleSessions}
               taskMap={taskMap}
               categoryMap={categoryMap}
@@ -564,6 +584,7 @@ export function CalendarView({
                 today={today}
                 selectedDay={selectedDay}
                 sessions={visibleSessions}
+                planTasks={categoryTasks}
                 taskMap={taskMap}
                 categoryMap={categoryMap}
                 weekdays={weekdays}
@@ -622,6 +643,7 @@ export function CalendarView({
                   title={t("calendar.scheduled")}
                   tasks={selectedDayScheduledOnly}
                   selectedDay={selectedDay}
+                  planKinds={new Map(selectedDayPlans.map((plan) => [plan.task.id, plan.kind]))}
                   selectedTaskId={selectedTaskId}
                   taskMap={taskMap}
                   categoryMap={categoryMap}
@@ -801,6 +823,7 @@ function YearGrid({
   today,
   selectedDay,
   tasks,
+  planTasks,
   sessions,
   weekStartsOn,
   onSelectDay,
@@ -810,6 +833,7 @@ function YearGrid({
   today: Date;
   selectedDay: Date;
   tasks: Task[];
+  planTasks: Task[];
   sessions: PomodoroSession[];
   weekStartsOn: WeekStartsOn;
   onSelectDay: (day: Date) => void;
@@ -847,7 +871,11 @@ function YearGrid({
                 if (!inMonth) {
                   return <span key={dayKey(day)} className="calendar-year-day is-outside" />;
                 }
-                const count = countDayActivity(tasks, sessions, day);
+                const listed = new Set(calendarTasksOnDay(tasks, day).map((task) => task.id));
+                const planned = calendarPlansOnDay(planTasks, day, today).filter(
+                  (plan) => !listed.has(plan.task.id),
+                ).length;
+                const count = countDayActivity(tasks, sessions, day) + planned;
                 const statutory = statutoryDayInfo(day);
                 const weekend = day.getDay() === 0 || day.getDay() === 6;
                 const lunar = formatLunarDayShort(day, locale);
@@ -901,6 +929,7 @@ function MonthGrid({
   today,
   selectedDay,
   tasks,
+  planTasks,
   sessions,
   taskMap,
   categoryMap,
@@ -912,6 +941,7 @@ function MonthGrid({
   today: Date;
   selectedDay: Date;
   tasks: Task[];
+  planTasks: Task[];
   sessions: PomodoroSession[];
   taskMap: Map<string, Task>;
   categoryMap: Map<string, Category>;
@@ -941,12 +971,18 @@ function MonthGrid({
       <div className="calendar-month-grid">
         {cells.map((day) => {
           const inMonth = day.getMonth() === month;
+          const plans = inMonth ? calendarPlansOnDay(planTasks, day, today) : [];
+          const planKind = new Map(plans.map((plan) => [plan.task.id, plan.kind]));
           const dayTasks = inMonth
             ? [
                 ...completedTasksOnDay(tasks, day),
                 ...scheduledTasksOnDay(tasks, day).filter(
                   (task) => !taskCompletedOnDay(task, day),
                 ),
+                ...plans
+                  .map((plan) => plan.task)
+                  .filter((task) => !scheduledTasksOnDay(tasks, day).some((item) => item.id === task.id)
+                    && !completedTasksOnDay(tasks, day).some((item) => item.id === task.id)),
               ]
             : [];
           const daySessions = inMonth ? focusSessionsOnDay(sessions, day) : [];
@@ -958,7 +994,7 @@ function MonthGrid({
           const weekend = day.getDay() === 0 || day.getDay() === 6;
           const events = new Map<
             string,
-            { task: Task; focus: boolean; done: boolean }
+            { task: Task; focus: boolean; done: boolean; planned: boolean }
           >();
           for (const session of daySessions) {
             const task = taskMap.get(session.task_id);
@@ -970,14 +1006,24 @@ function MonthGrid({
                 task,
                 focus: true,
                 done: taskCompletedOnDay(task, day),
+                planned: planKind.has(task.id),
               });
             }
           }
           for (const task of dayTasks) {
             const prev = events.get(task.id);
             const done = taskCompletedOnDay(task, day);
-            if (prev) prev.done = prev.done || done;
-            else events.set(task.id, { task, focus: false, done });
+            if (prev) {
+              prev.done = prev.done || done;
+              prev.planned = prev.planned || planKind.has(task.id);
+            } else {
+              events.set(task.id, {
+                task,
+                focus: false,
+                done,
+                planned: planKind.has(task.id),
+              });
+            }
           }
           const dayEvents = [...events.values()];
           return (
@@ -1027,16 +1073,23 @@ function MonthGrid({
                   const category = task.category_id
                     ? categoryMap.get(task.category_id)
                     : null;
-                  const tone =
+                  const tone = [
                     event.focus && event.done
                       ? "is-both"
                       : event.done
                         ? "is-complete"
                         : event.focus
                           ? "is-focus"
-                          : "";
-                  const toneTitle =
-                    event.focus && event.done
+                          : "",
+                    event.planned ? "is-planned" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+                  const toneTitle = event.planned
+                    ? planKind.get(task.id) === "recurrence"
+                      ? t("calendar.recurrenceMark")
+                      : t("calendar.planned")
+                    : event.focus && event.done
                       ? t("calendar.doneAndFocused")
                       : event.done
                         ? t("calendar.completed")
@@ -1077,6 +1130,7 @@ function WeekGrid({
   today,
   selectedDay,
   sessions,
+  planTasks,
   taskMap,
   categoryMap,
   weekdays,
@@ -1092,6 +1146,7 @@ function WeekGrid({
   today: Date;
   selectedDay: Date;
   sessions: PomodoroSession[];
+  planTasks: Task[];
   taskMap: Map<string, Task>;
   categoryMap: Map<string, Category>;
   weekdays: string[];
@@ -1155,6 +1210,9 @@ function WeekGrid({
             <strong>
               {day.getMonth() + 1}/{day.getDate()}
             </strong>
+            {calendarPlansOnDay(planTasks, day, today).length > 0 && (
+              <span className="calendar-week-plan-dot" title={t("calendar.planned")} />
+            )}
           </button>
           <div
             className={`calendar-week-matrix-track${
@@ -1258,6 +1316,7 @@ function DayTaskSection({
   title,
   tasks,
   selectedDay,
+  planKinds,
   selectedTaskId,
   taskMap,
   categoryMap,
@@ -1268,6 +1327,7 @@ function DayTaskSection({
   title: string;
   tasks: Task[];
   selectedDay: Date;
+  planKinds?: ReadonlyMap<string, "start" | "recurrence">;
   selectedTaskId: string | null;
   taskMap: Map<string, Task>;
   categoryMap: Map<string, Category>;
@@ -1286,12 +1346,15 @@ function DayTaskSection({
             : null;
           const marker =
             kind === "completed" ? "done" : taskMarkerKind(task, selectedDay);
+          const planKind = planKinds?.get(task.id);
           return (
             <li
               key={task.id}
               className={`calendar-day-item${
                 selectedTaskId === task.id ? " is-selected" : ""
-              }${task.status === "done" ? " is-done" : ""}`}
+              }${task.status === "done" ? " is-done" : ""}${
+                planKind ? " is-planned" : ""
+              }`}
             >
               <button
                 type="button"
@@ -1300,8 +1363,10 @@ function DayTaskSection({
               >
                 <strong>{formatTaskLineage(task, taskMap)}</strong>
                 <span className="calendar-day-item-meta">
+                  {planKind === "recurrence" && <em>{t("calendar.recurrenceMark")}</em>}
+                  {planKind === "start" && <em>{t("calendar.planned")}</em>}
                   {marker === "done" && <em>{t("calendar.finishedMark")}</em>}
-                  {marker === "start" && <em>{t("calendar.startMark")}</em>}
+                  {planKind !== "start" && marker === "start" && <em>{t("calendar.startMark")}</em>}
                   {marker === "due" && <em>{t("calendar.dueMark")}</em>}
                   {marker === "span" && <em>{t("calendar.spanMark")}</em>}
                   <span>{t("calendar.priority", { level: t(task.priority === "high" ? "common.priorityHighShort" : task.priority === "medium" ? "common.priorityMediumShort" : "common.priorityLowShort") })}</span>

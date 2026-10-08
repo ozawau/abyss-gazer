@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CreateSubtaskDialog } from "../components/CreateSubtaskDialog";
 import { TaskDetailDialog, type TaskDetailSave } from "../components/TaskDetailDialog";
 import { TaskPomodoroClocks } from "../components/ClockEstimate";
+import { TaskHoverCard, useTaskHover } from "../components/TaskHoverCard";
 import { TaskLineageTitle } from "../components/TaskLineageTitle";
 import { TaskRowMenu } from "../components/TaskRowMenu";
 import { useI18n } from "../components/LocaleProvider";
@@ -15,13 +16,16 @@ import {
   Task,
   updateTask,
 } from "../lib/api";
-import { applyAncestorFields, removeTaskTree, taskById } from "../lib/taskTree";
+import { applyAncestorFields, ancestorTasks, removeTaskTree, taskById } from "../lib/taskTree";
+import { isAndroidDevice } from "../lib/viewport";
+import { isInTemplateTree } from "../lib/taskRecurrence";
 
 const PAGE_SIZE = 15;
 
 interface CompletedTasksViewProps {
   tasks: Task[];
   onTasksChange: (tasks: Task[]) => void;
+  onOpenTemplate?: (templateId: string) => void;
   categoryFilter: string;
   onCategoryFilterChange: (filter: string) => void;
   dataEpoch: number;
@@ -44,11 +48,21 @@ function endOfDayMs(ymd: string): number | null {
 export function CompletedTasksView({
   tasks,
   onTasksChange,
+  onOpenTemplate,
   categoryFilter,
   onCategoryFilterChange,
   dataEpoch,
 }: CompletedTasksViewProps) {
   const { locale, t } = useI18n();
+  const android = isAndroidDevice();
+  const {
+    hoverTaskId,
+    hoverCardRef,
+    cancelHoverHide,
+    scheduleHoverHide,
+    dismissHover,
+    rowPointerHandlers,
+  } = useTaskHover(android);
   const [categories, setCategories] = useState<Category[]>([]);
   const [titleQuery, setTitleQuery] = useState("");
   const [completedFrom, setCompletedFrom] = useState("");
@@ -101,7 +115,7 @@ export function CompletedTasksView({
     const createdEnd = endOfDayMs(createdTo);
 
     return tasks
-      .filter((t) => t.status === "done")
+      .filter((t) => t.status === "done" && !isInTemplateTree(t, tasksById))
       .filter((t) => {
         if (q && !t.title.toLowerCase().includes(q)) return false;
         if (categoryFilter === "none" && t.category_id) return false;
@@ -151,6 +165,15 @@ export function CompletedTasksView({
     (safePage - 1) * PAGE_SIZE,
     safePage * PAGE_SIZE,
   );
+  const hoverTask = hoverTaskId
+    ? tasks.find((task) => task.id === hoverTaskId) ?? null
+    : null;
+
+  useEffect(() => {
+    if (!hoverTaskId) return;
+    if (pageItems.some((task) => task.id === hoverTaskId)) return;
+    dismissHover();
+  }, [hoverTaskId, pageItems, dismissHover]);
 
   async function restoreTask(task: Task) {
     setBusy(true);
@@ -191,6 +214,7 @@ export function CompletedTasksView({
       notes: input.notes,
       due_at: input.due_at,
       start_at: input.start_at,
+      recurrence: input.recurrence,
     });
     onTasksChange(applyAncestorFields(tasks, next));
     setDetailTask(next);
@@ -307,6 +331,7 @@ export function CompletedTasksView({
               <li
                 key={task.id}
                 className="completed-row"
+                {...rowPointerHandlers(task.id)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setRowMenu({ task, x: e.clientX, y: e.clientY });
@@ -461,6 +486,23 @@ export function CompletedTasksView({
         }}
       />
 
+      {hoverTask && (
+        <TaskHoverCard
+          cardRef={hoverCardRef}
+          task={hoverTask}
+          parents={ancestorTasks(hoverTask, tasksById).reverse()}
+          category={
+            hoverTask.category_id
+              ? categoryMap.get(hoverTask.category_id) ?? null
+              : null
+          }
+          pinned={android}
+          onDismiss={dismissHover}
+          onHoverStart={android ? undefined : cancelHoverHide}
+          onHoverEnd={android ? undefined : scheduleHoverHide}
+        />
+      )}
+
       {rowMenu && (
         <TaskRowMenu
           x={rowMenu.x}
@@ -470,6 +512,17 @@ export function CompletedTasksView({
             setDetailTask(rowMenu.task);
             setRowMenu(null);
           }}
+          onOpenTemplate={
+            onOpenTemplate &&
+            rowMenu.task.recurrence_source_id &&
+            tasksById.has(rowMenu.task.recurrence_source_id)
+              ? () => {
+                  const templateId = rowMenu.task.recurrence_source_id;
+                  setRowMenu(null);
+                  if (templateId) onOpenTemplate(templateId);
+                }
+              : undefined
+          }
           onCreateSubtask={() => {
             setSubtaskParent(rowMenu.task);
             setRowMenu(null);

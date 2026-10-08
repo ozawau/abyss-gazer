@@ -52,6 +52,7 @@ pub fn run() {
             commands::tasks::reorder_task,
             commands::tasks::delete_task,
             commands::tasks::get_task,
+            commands::tasks::spawn_recurring_tasks,
             commands::categories::list_categories,
             commands::categories::create_category,
             commands::categories::update_category,

@@ -34,6 +34,9 @@ export interface Task {
   completed_at: number | null;
   created_at: number;
   updated_at: number;
+  recurrence: string | null;
+  recurrence_source_id: string | null;
+  recurrence_occurrence: string | null;
 }
 
 export interface PomodoroSession {
@@ -83,6 +86,7 @@ export function updateTask(input: {
   estimate_pomodoros?: number;
   due_at?: number | null;
   start_at?: number | null;
+  recurrence?: string | null;
 }): Promise<Task> {
   const payload: Record<string, unknown> = { id: input.id };
   if (input.title !== undefined) payload.title = input.title;
@@ -95,7 +99,18 @@ export function updateTask(input: {
   }
   if (input.due_at !== undefined) payload.due_at = input.due_at;
   if (input.start_at !== undefined) payload.start_at = input.start_at;
+  if (input.recurrence !== undefined) payload.recurrence = input.recurrence;
   return afterLocalMutation(invoke("update_task", { input: payload }));
+}
+
+export function spawnRecurringTasks(
+  items: { template_id: string; occurrence: string; start_at: number }[],
+): Promise<{ created: Task[]; settled: string[] }> {
+  return invoke("spawn_recurring_tasks", { items }).then(async (outcome) => {
+    const result = outcome as { created: Task[]; settled: string[] };
+    if (result.created.length > 0) notifyLocalDataChanged();
+    return result;
+  });
 }
 
 export function reparentTask(input: {

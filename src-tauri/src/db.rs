@@ -41,6 +41,9 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
             completed_at INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
+            recurrence TEXT,
+            recurrence_source_id TEXT,
+            recurrence_occurrence TEXT,
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
         );
 
@@ -193,6 +196,32 @@ fn migrate_schema(conn: &Connection) -> SqliteResult<()> {
         conn.execute("ALTER TABLE tasks ADD COLUMN parent_id TEXT", [])?;
     }
     conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_tasks_parent_id ON tasks(parent_id);")?;
+
+    let mut stmt = conn.prepare("PRAGMA table_info(tasks)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if !cols.iter().any(|c| c == "recurrence") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN recurrence TEXT", [])?;
+    }
+    if !cols.iter().any(|c| c == "recurrence_source_id") {
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN recurrence_source_id TEXT",
+            [],
+        )?;
+    }
+    if !cols.iter().any(|c| c == "recurrence_occurrence") {
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN recurrence_occurrence TEXT",
+            [],
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_recurrence_instance
+         ON tasks(recurrence_source_id, recurrence_occurrence)
+         WHERE recurrence_source_id IS NOT NULL AND recurrence_occurrence IS NOT NULL;",
+    )?;
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS habit_checkins (

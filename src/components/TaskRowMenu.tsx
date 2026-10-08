@@ -9,6 +9,7 @@ interface TaskRowMenuProps {
   x: number;
   y: number;
   onEdit: () => void;
+  onOpenTemplate?: () => void;
   onCreateSubtask: () => void;
   onAttachAsSubtask?: () => void;
   onDelete: () => void;
@@ -91,6 +92,7 @@ export function TaskRowMenu({
   x,
   y,
   onEdit,
+  onOpenTemplate,
   onCreateSubtask,
   onAttachAsSubtask,
   onDelete,
@@ -142,6 +144,11 @@ export function TaskRowMenu({
       <button type="button" role="menuitem" onClick={onEdit}>
         {t("common.edit")}
       </button>
+      {onOpenTemplate && (
+        <button type="button" role="menuitem" onClick={onOpenTemplate}>
+          {t("tasks.openTemplate")}
+        </button>
+      )}
       <button type="button" role="menuitem" onClick={onCreateSubtask}>
         {t("detail.createSubtask")}
       </button>

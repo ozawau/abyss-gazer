@@ -1540,6 +1540,13 @@ html.is-android .tasks-view .task-row {
   font-weight: 600;
 }
 
+.category-option-mark {
+  width: 0.85rem;
+  flex: none;
+  font-size: 0.72rem;
+  color: #1d4ed8;
+}
+
 .category-option-add {
   margin-top: 0.15rem;
   border-top: 1px solid var(--border);
@@ -1788,7 +1795,8 @@ html.is-android .tasks-view .task-row {
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
-.field input {
+.field input,
+.field select {
   padding: 0.65rem 0.8rem;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -1797,9 +1805,54 @@ html.is-android .tasks-view .task-row {
   outline: none;
 }
 
-.field input:focus {
+.field input:focus,
+.field select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.task-detail-repeat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.task-detail-repeat-row .category-picker {
+  flex: 1 1 5.8rem;
+}
+
+.task-detail-interval {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.task-detail-interval input {
+  width: 4.5rem;
+  min-height: 2rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.task-detail-interval span {
+  font-size: 0.85rem;
+}
+
+.task-recurrence-tag,
+.task-template-spawned {
+  flex: none;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.task-template-spawned {
+  max-width: 12rem;
 }
 
 .color-grid {
@@ -3090,7 +3143,11 @@ html.is-narrow {
   .tasks-subnav-item {
     flex: 1;
     width: auto;
+    min-width: 0;
     min-height: 2.5rem;
+    padding: 0.35rem 0.2rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
     text-align: center;
     border-radius: 999px;
   }
@@ -3170,7 +3227,8 @@ html.is-narrow {
 
   &.is-android .tasks-view .task-category-name,
   &.is-android .tasks-view .task-pomodoro-clocks,
-  &.is-android .tasks-view .task-actions {
+  &.is-android .tasks-view .task-actions,
+  &.is-android .tasks-view .task-recurrence-tag {
     display: none;
   }
 
@@ -3732,6 +3790,23 @@ html.is-narrow {
 
 .calendar-month-event.is-both {
   background: linear-gradient(90deg, #dbeafe 0%, #dcfce7 100%);
+}
+
+.calendar-month-event.is-planned {
+  border-left-style: dashed;
+  font-style: italic;
+}
+
+.calendar-day-item.is-planned strong {
+  font-style: italic;
+}
+
+.calendar-week-plan-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-top: 0.15rem;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .calendar-week-event.is-done,

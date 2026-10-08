@@ -20,6 +20,9 @@ pub struct Task {
     pub completed_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub recurrence: Option<String>,
+    pub recurrence_source_id: Option<String>,
+    pub recurrence_occurrence: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +52,22 @@ pub struct UpdateTaskInput {
     /// Missing = leave unchanged; `null` = clear; number = set.
     #[serde(default)]
     pub start_at: Option<Option<i64>>,
+    /// Missing = leave unchanged; `null` = clear; string = set.
+    #[serde(default)]
+    pub recurrence: Option<Option<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SpawnRecurringItem {
+    pub template_id: String,
+    pub occurrence: String,
+    pub start_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SpawnRecurringOutcome {
+    pub created: Vec<Task>,
+    pub settled: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,12 +126,16 @@ fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         completed_at: row.get(11)?,
         created_at: row.get(12)?,
         updated_at: row.get(13)?,
-        completed_pomodoros: row.get(14)?,
+        recurrence: row.get(14)?,
+        recurrence_source_id: row.get(15)?,
+        recurrence_occurrence: row.get(16)?,
+        completed_pomodoros: row.get(17)?,
     })
 }
 
 const TASK_SELECT: &str = "SELECT t.id, t.title, t.notes, t.status, t.priority, t.sort_order,
        t.parent_id, t.category_id, t.estimate_pomodoros, t.due_at, t.start_at, t.completed_at, t.created_at, t.updated_at,
+       t.recurrence, t.recurrence_source_id, t.recurrence_occurrence,
        CAST(COALESCE((SELECT SUM(p.credit) FROM pomodoro_sessions p
          WHERE p.kind = 'focus' AND p.completed = 1
            AND p.task_id IN (
@@ -422,6 +445,12 @@ pub fn update_task(
         Some(Some(ts)) => Some(ts),
     };
 
+    let recurrence = match input.recurrence {
+        None => existing.recurrence.clone(),
+        Some(None) => None,
+        Some(Some(raw)) => Some(canonical_recurrence(&raw)?),
+    };
+
     let updated_at = monotonic_updated_at(existing.updated_at);
     let completed_at = if status == "done" {
         if previous_status == "done" {
@@ -436,8 +465,8 @@ pub fn update_task(
     conn.execute(
         "UPDATE tasks SET title = ?1, notes = ?2, status = ?3, priority = ?4, sort_order = ?5,
          category_id = ?6, estimate_pomodoros = ?7, due_at = ?8, start_at = ?9, completed_at = ?10,
-         updated_at = ?11
-         WHERE id = ?12",
+         recurrence = ?11, updated_at = ?12
+         WHERE id = ?13",
         rusqlite::params![
             title,
             notes,
@@ -449,6 +478,7 @@ pub fn update_task(
             due_at,
             start_at,
             completed_at,
+            recurrence,
             updated_at,
             input.id
         ],
@@ -676,6 +706,242 @@ pub fn get_task(db: State<'_, DbState>, id: String) -> Result<Task, String> {
     fetch_task(&conn, &id)
 }
 
+const RECURRENCE_NAMESPACE: Uuid = uuid::uuid!("c0ffee00-7a51-4eec-9a11-ab9550a2e001");
+
+fn is_day_key(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            index == 4 || index == 7 || byte.is_ascii_digit()
+        })
+}
+
+fn read_number_list(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    plural: &str,
+    singular: &str,
+    min: i64,
+    max: i64,
+) -> Result<Vec<i64>, String> {
+    let raw = obj
+        .get(plural)
+        .or_else(|| obj.get(singular))
+        .ok_or_else(|| "Invalid recurrence".to_string())?;
+    let values = if let Some(list) = raw.as_array() {
+        if list.is_empty() {
+            return Err("Invalid recurrence".into());
+        }
+        list.iter()
+            .map(|item| item.as_i64().ok_or_else(|| "Invalid recurrence".to_string()))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        vec![raw.as_i64().ok_or_else(|| "Invalid recurrence".to_string())?]
+    };
+    let mut nums = Vec::new();
+    for n in values {
+        if !(min..=max).contains(&n) {
+            return Err("Invalid recurrence".into());
+        }
+        if !nums.contains(&n) {
+            nums.push(n);
+        }
+    }
+    nums.sort_unstable();
+    Ok(nums)
+}
+
+fn read_counts(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(&'static str, Vec<i64>), String> {
+    if obj.get("indexes").is_none() && obj.get("index").and_then(|item| item.as_str()) == Some("last")
+    {
+        return Ok(("backward", vec![1]));
+    }
+    let indexes = if obj.contains_key("indexes") {
+        read_number_list(obj, "indexes", "indexes", 1, 31)?
+    } else {
+        read_number_list(obj, "index", "index", 1, 31)?
+    };
+    let direction = match obj.get("direction").and_then(|item| item.as_str()) {
+        Some("backward") => "backward",
+        Some("forward") | None => "forward",
+        _ => return Err("Invalid recurrence".into()),
+    };
+    Ok((direction, indexes))
+}
+
+fn canonical_recurrence(raw: &str) -> Result<String, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| "Invalid recurrence".to_string())?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| "Invalid recurrence".to_string())?;
+    let kind = obj
+        .get("kind")
+        .and_then(|item| item.as_str())
+        .ok_or_else(|| "Invalid recurrence".to_string())?;
+    let since = obj.get("since").and_then(|item| item.as_str()).unwrap_or("");
+    if !since.is_empty() && !is_day_key(since) {
+        return Err("Invalid recurrence".into());
+    }
+
+    let mut out = serde_json::Map::new();
+    match kind {
+        "daily" => {
+            out.insert("kind".into(), serde_json::json!("daily"));
+        }
+        "interval" => {
+            let days = obj
+                .get("days")
+                .and_then(|item| item.as_i64())
+                .ok_or_else(|| "Invalid recurrence".to_string())?;
+            if days < 1 {
+                return Err("Invalid recurrence".into());
+            }
+            out.insert("kind".into(), serde_json::json!("interval"));
+            out.insert("days".into(), serde_json::json!(days));
+        }
+        "weekly" => {
+            let weekdays = read_number_list(obj, "weekdays", "weekday", 0, 6)?;
+            out.insert("kind".into(), serde_json::json!("weekly"));
+            out.insert("weekdays".into(), serde_json::json!(weekdays));
+        }
+        "monthly-day" => {
+            let days = read_number_list(obj, "days", "day", 1, 31)?;
+            out.insert("kind".into(), serde_json::json!("monthly-day"));
+            out.insert("days".into(), serde_json::json!(days));
+        }
+        "monthly-workday" | "monthly-restday" => {
+            let (direction, indexes) = read_counts(obj)?;
+            out.insert("kind".into(), serde_json::json!(kind));
+            out.insert("direction".into(), serde_json::json!(direction));
+            out.insert("indexes".into(), serde_json::json!(indexes));
+        }
+        "monthly" => match obj.get("anchor").and_then(|item| item.as_str()) {
+            Some("first-workday") => {
+                out.insert("kind".into(), serde_json::json!("monthly-workday"));
+                out.insert("direction".into(), serde_json::json!("forward"));
+                out.insert("indexes".into(), serde_json::json!([1]));
+            }
+            Some("last-restday") => {
+                out.insert("kind".into(), serde_json::json!("monthly-restday"));
+                out.insert("direction".into(), serde_json::json!("backward"));
+                out.insert("indexes".into(), serde_json::json!([1]));
+            }
+            _ => return Err("Invalid recurrence".into()),
+        },
+        "yearly" | "lunar-yearly" => {
+            let max_day: i64 = if kind == "lunar-yearly" { 30 } else { 31 };
+            let months = read_number_list(obj, "months", "month", 1, 12)?;
+            let days = read_number_list(obj, "days", "day", 1, max_day)?;
+            out.insert("kind".into(), serde_json::json!(kind));
+            out.insert("months".into(), serde_json::json!(months));
+            out.insert("days".into(), serde_json::json!(days));
+        }
+        _ => return Err("Invalid recurrence".into()),
+    }
+    if !since.is_empty() {
+        out.insert("since".into(), serde_json::json!(since));
+    }
+    serde_json::to_string(&serde_json::Value::Object(out)).map_err(|err| err.to_string())
+}
+
+fn recurrence_instance_id(template_id: &str, occurrence: &str) -> String {
+    Uuid::new_v5(
+        &RECURRENCE_NAMESPACE,
+        format!("{template_id}:{occurrence}").as_bytes(),
+    )
+    .to_string()
+}
+
+fn spawn_recurring_task(
+    conn: &rusqlite::Connection,
+    template_id: &str,
+    occurrence: &str,
+    start_at: i64,
+) -> Result<Option<Task>, String> {
+    if !is_day_key(occurrence) {
+        return Ok(None);
+    }
+    let template = match fetch_task(conn, template_id) {
+        Ok(task) => task,
+        Err(_) => return Ok(None),
+    };
+    let id = recurrence_instance_id(template_id, occurrence);
+    let tombstoned: bool = conn
+        .query_row(
+            "SELECT 1 FROM sync_tombstones WHERE kind = 'task' AND entity_id = ?1",
+            [&id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if tombstoned {
+        return Ok(None);
+    }
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM tasks
+             WHERE id = ?1
+                OR (recurrence_source_id = ?2 AND recurrence_occurrence = ?3)
+             LIMIT 1",
+            rusqlite::params![id, template_id, occurrence],
+            |row| row.get(0),
+        )
+        .ok();
+    if existing.is_some() {
+        return Ok(None);
+    }
+
+    let sort_order =
+        next_sort_order_front(conn, &template.priority, template.parent_id.as_deref())?;
+    let ts = now_ms();
+    conn.execute(
+        "INSERT INTO tasks (
+            id, title, notes, status, priority, sort_order, parent_id, category_id,
+            estimate_pomodoros, due_at, start_at, completed_at, created_at, updated_at,
+            recurrence_source_id, recurrence_occurrence
+         ) VALUES (?1, ?2, ?3, 'todo', ?4, ?5, ?6, ?7, ?8, NULL, ?9, NULL, ?10, ?10, ?11, ?12)",
+        rusqlite::params![
+            id,
+            template.title,
+            template.notes,
+            template.priority,
+            sort_order,
+            template.parent_id,
+            template.category_id,
+            template.estimate_pomodoros,
+            start_at,
+            ts,
+            template_id,
+            occurrence,
+        ],
+    )
+    .map_err(|err| err.to_string())?;
+    fetch_task(conn, &id).map(Some)
+}
+
+#[tauri::command]
+pub fn spawn_recurring_tasks(
+    db: State<'_, DbState>,
+    items: Vec<SpawnRecurringItem>,
+) -> Result<SpawnRecurringOutcome, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut created = Vec::new();
+    let mut settled = Vec::new();
+    for item in items.into_iter().take(500) {
+        let key = format!("{}:{}", item.template_id, item.occurrence);
+        if let Some(task) =
+            spawn_recurring_task(&conn, &item.template_id, &item.occurrence, item.start_at)?
+        {
+            created.push(task);
+        }
+        settled.push(key);
+    }
+    Ok(SpawnRecurringOutcome { created, settled })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{complete_descendants, fetch_task};
@@ -749,5 +1015,87 @@ mod tests {
         assert!((child.completed_pomodoros - 0.8).abs() < 0.001);
         assert!((parent.completed_pomodoros - 1.8).abs() < 0.001);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn spawning_is_idempotent_and_respects_tombstones() {
+        use super::spawn_recurring_task;
+        use crate::sync_logical::record_tombstone;
+
+        let path = std::env::temp_dir().join(format!(
+            "abyss-gazer-recurrence-{}.db",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let conn = open_db(&path).expect("open");
+        conn.execute(
+            "INSERT INTO tasks (id, title, notes, status, priority, sort_order, estimate_pomodoros, created_at, updated_at, recurrence)
+             VALUES ('tpl', 'Weekly', 'notes', 'todo', 'high', 0, 2, 1, 1, '{\"kind\":\"weekly\",\"weekday\":1}')",
+            [],
+        )
+        .expect("seed");
+
+        let first = spawn_recurring_task(&conn, "tpl", "2026-10-12", 1_700_000_000_000)
+            .expect("spawn")
+            .expect("created");
+        assert_eq!(first.title, "Weekly");
+        assert_eq!(first.notes, "notes");
+        assert_eq!(first.estimate_pomodoros, 2);
+        assert_eq!(first.recurrence_source_id.as_deref(), Some("tpl"));
+        assert_eq!(first.recurrence_occurrence.as_deref(), Some("2026-10-12"));
+        assert!(first.recurrence.is_none());
+        assert!(spawn_recurring_task(&conn, "tpl", "2026-10-12", 1).expect("again").is_none());
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE recurrence_source_id = 'tpl'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(count, 1);
+
+        conn.execute("DELETE FROM tasks WHERE id = ?1", [&first.id])
+            .expect("delete instance");
+        record_tombstone(&conn, "task", &first.id).expect("tombstone");
+        assert!(spawn_recurring_task(&conn, "tpl", "2026-10-12", 1).expect("blocked").is_none());
+        let after: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE recurrence_source_id = 'tpl'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(after, 0);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn canonical_recurrence_accepts_lists_and_legacy_values() {
+        use super::canonical_recurrence;
+
+        let weekly = canonical_recurrence(r#"{"kind":"weekly","weekday":6}"#).unwrap();
+        assert!(weekly.contains(r#""weekdays":[6]"#));
+        let days =
+            canonical_recurrence(r#"{"kind":"monthly-day","days":[3,1,2,1]}"#).unwrap();
+        assert!(days.contains(r#""days":[1,2,3]"#));
+        let counted = canonical_recurrence(
+            r#"{"kind":"monthly-workday","direction":"forward","indexes":[3,1]}"#,
+        )
+        .unwrap();
+        assert!(counted.contains(r#""indexes":[1,3]"#));
+        let legacy = canonical_recurrence(
+            r#"{"kind":"monthly-restday","index":"last"}"#,
+        )
+        .unwrap();
+        assert!(legacy.contains(r#""direction":"backward""#));
+        assert!(legacy.contains(r#""indexes":[1]"#));
+        let interval = canonical_recurrence(r#"{"kind":"interval","days":3}"#).unwrap();
+        assert!(interval.contains(r#""days":3"#));
+        assert!(canonical_recurrence(r#"{"kind":"interval","days":0}"#).is_err());
+        assert!(canonical_recurrence(r#"{"kind":"weekly","weekdays":[]}"#).is_err());
+        assert!(canonical_recurrence(r#"{"kind":"yearly","months":[1,13],"days":[1]}"#).is_err());
     }
 }
