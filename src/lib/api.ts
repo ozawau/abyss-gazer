@@ -342,6 +342,8 @@ export interface SystemSettings {
   syncOnDataChange: boolean;
   localBackupDir: string | null;
   gitCommitMessage: string;
+  /** Optional HTTP(S)/SOCKS proxy for Git sync, e.g. `http://127.0.0.1:7890`. */
+  gitProxy: string | null;
   weekStartsOn: WeekStartsOn;
   ganttActivityMode: "discrete" | "continuous";
   launchAtLogin: boolean;
@@ -363,6 +365,7 @@ export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   syncOnDataChange: false,
   localBackupDir: null,
   gitCommitMessage: "chore: sync Abyss Gazer data",
+  gitProxy: null,
   weekStartsOn: 1,
   ganttActivityMode: "discrete",
   launchAtLogin: false,

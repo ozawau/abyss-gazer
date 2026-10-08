@@ -59,17 +59,42 @@ fn copy_db_file(src: &Path, dest_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn run_git(cwd: &Path, args: &[&str], my_gen: u64) -> Result<String, String> {
+fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    my_gen: u64,
+    proxy: Option<&str>,
+) -> Result<String, String> {
     check_sync_generation(my_gen)?;
-    let mut child = Command::new("git")
-        .args(args)
+    let proxy_args: Option<[String; 4]> = proxy.map(|proxy| {
+        [
+            "-c".into(),
+            format!("http.proxy={proxy}"),
+            "-c".into(),
+            format!("https.proxy={proxy}"),
+        ]
+    });
+    let mut cmd = Command::new("git");
+    if let Some(ref proxy_args) = proxy_args {
+        cmd.args(proxy_args.iter());
+    }
+    cmd.args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "/usr/bin/false")
         .env("GCM_INTERACTIVE", "Never")
         .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
-        .env("GIT_EDITOR", "true")
+        .env("GIT_EDITOR", "true");
+    if let Some(proxy) = proxy {
+        cmd.env("http_proxy", proxy)
+            .env("https_proxy", proxy)
+            .env("HTTP_PROXY", proxy)
+            .env("HTTPS_PROXY", proxy)
+            .env("ALL_PROXY", proxy)
+            .env("all_proxy", proxy);
+    }
+    let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -127,35 +152,46 @@ fn sync_local(db_path: &Path, backup_dir: &str) -> Result<(), String> {
     copy_db_file(db_path, &dest)
 }
 
-fn git_pull(data_dir: &Path, my_gen: u64) -> Result<(), String> {
+fn git_pull(data_dir: &Path, my_gen: u64, proxy: Option<&str>) -> Result<(), String> {
     ensure_git_repo(data_dir)?;
-    let branch = run_git(data_dir, &["rev-parse", "--abbrev-ref", "HEAD"], my_gen)?
-        .trim()
-        .to_string();
+    let branch = run_git(
+        data_dir,
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        my_gen,
+        proxy,
+    )?
+    .trim()
+    .to_string();
     if branch.is_empty() || branch == "HEAD" {
         return Err("无法识别当前 git 分支".into());
     }
-    run_git(data_dir, &["fetch", "origin"], my_gen).map_err(map_git_pull_err)?;
+    run_git(data_dir, &["fetch", "origin"], my_gen, proxy).map_err(map_git_pull_err)?;
     run_git(
         data_dir,
         &["reset", "--hard", &format!("origin/{branch}")],
         my_gen,
+        proxy,
     )
     .map(|_| ())
     .map_err(map_git_pull_err)
 }
 
-fn git_push_logical(data_dir: &Path, message: &str, my_gen: u64) -> Result<(), String> {
-    run_git(data_dir, &["add", "sync", ".gitignore"], my_gen)?;
-    let status = run_git(data_dir, &["status", "--porcelain"], my_gen)?;
+fn git_push_logical(
+    data_dir: &Path,
+    message: &str,
+    my_gen: u64,
+    proxy: Option<&str>,
+) -> Result<(), String> {
+    run_git(data_dir, &["add", "sync", ".gitignore"], my_gen, proxy)?;
+    let status = run_git(data_dir, &["status", "--porcelain"], my_gen, proxy)?;
     if !status.is_empty() {
-        match run_git(data_dir, &["commit", "-m", message], my_gen) {
+        match run_git(data_dir, &["commit", "-m", message], my_gen, proxy) {
             Ok(_) => {}
             Err(e) if e.contains("nothing to commit") => {}
             Err(e) => return Err(e),
         }
     }
-    run_git(data_dir, &["push"], my_gen)
+    run_git(data_dir, &["push"], my_gen, proxy)
         .map(|_| ())
         .map_err(map_git_push_err)
 }
@@ -500,6 +536,7 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
     let method = settings.sync_method;
     let message = settings.git_commit_message.clone();
     let backup = settings.local_backup_dir.clone();
+    let git_proxy = settings.git_proxy.clone();
 
     let my_gen = begin_sync_generation();
     let app_for_sync = app.clone();
@@ -520,6 +557,7 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
             db_path
         };
         check_sync_generation(my_gen)?;
+        let proxy = git_proxy.as_deref();
         let sync_result = match method {
             SyncMethod::Local => {
                 let backup = backup.as_deref().unwrap_or("");
@@ -530,12 +568,12 @@ pub async fn run_data_sync(app: AppHandle) -> Result<(), String> {
                     .parent()
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| db_path.clone());
-                git_pull(&data_dir, my_gen)?;
+                git_pull(&data_dir, my_gen, proxy)?;
                 {
                     let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
                     merge_and_export_logical(&mut conn, &data_dir, &db_path, my_gen)?;
                 }
-                git_push_logical(&data_dir, &message, my_gen)
+                git_push_logical(&data_dir, &message, my_gen, proxy)
             }
         };
         sync_result

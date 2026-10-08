@@ -270,6 +270,7 @@ function MainApp() {
     systemSettings.syncMethod,
     systemSettings.localBackupDir,
     systemSettings.gitCommitMessage,
+    systemSettings.gitProxy,
     systemSettings.dataDir,
     syncToastMessages,
     reloadAfterSync,

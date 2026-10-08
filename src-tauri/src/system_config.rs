@@ -32,6 +32,9 @@ pub struct SystemSettings {
     pub sync_on_data_change: bool,
     pub local_backup_dir: Option<String>,
     pub git_commit_message: String,
+    /// Optional HTTP(S)/SOCKS proxy for Git sync, e.g. `http://127.0.0.1:7890`.
+    #[serde(default)]
+    pub git_proxy: Option<String>,
     /// Calendar week start: 0=Sunday … 6=Saturday (same as JS `Date.getDay()`).
     #[serde(default = "default_week_starts_on")]
     pub week_starts_on: u8,
@@ -76,6 +79,7 @@ impl Default for SystemSettings {
             sync_on_data_change: false,
             local_backup_dir: None,
             git_commit_message: "chore: sync Abyss Gazer data".into(),
+            git_proxy: None,
             week_starts_on: default_week_starts_on(),
             gantt_activity_mode: default_gantt_activity_mode(),
             launch_at_login: false,
@@ -132,6 +136,10 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
         .local_backup_dir
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let git_proxy = settings
+        .git_proxy
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let git_commit_message = {
         let trimmed = settings.git_commit_message.trim().to_string();
         if trimmed.is_empty() {
@@ -148,6 +156,7 @@ pub fn normalize_system_settings(settings: SystemSettings) -> SystemSettings {
         sync_on_data_change: settings.sync_on_data_change,
         local_backup_dir,
         git_commit_message,
+        git_proxy,
         week_starts_on: normalize_week_starts_on(settings.week_starts_on),
         gantt_activity_mode: normalize_gantt_activity_mode(&settings.gantt_activity_mode),
         launch_at_login: settings.launch_at_login,

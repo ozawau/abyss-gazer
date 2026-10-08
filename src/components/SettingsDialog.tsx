@@ -1083,31 +1083,61 @@ export function SettingsDialog({
                   )}
 
                   {system.syncMethod === "git" && (
-                    <label className="settings-row settings-row-stack">
-                      <span className="settings-row-label">
-                        Git Commit Message
-                      </span>
-                      <input
-                        className="settings-text-input"
-                        value={system.gitCommitMessage}
-                        disabled={busy || syncOff}
-                        onChange={(e) =>
-                          setSystem((s) => ({
-                            ...s,
-                            gitCommitMessage: e.target.value,
-                          }))
-                        }
-                        onBlur={(e) => {
-                          const value = e.target.value.trim();
-                          if (value === system.gitCommitMessage.trim()) return;
-                          patchSystem({
-                            gitCommitMessage:
-                              value || DEFAULT_SYSTEM_SETTINGS.gitCommitMessage,
-                          });
-                        }}
-                        placeholder="chore: sync Abyss Gazer data"
-                      />
-                    </label>
+                    <>
+                      <label className="settings-row settings-row-stack">
+                        <span className="settings-row-label">
+                          {t("settings.gitCommitMessage")}
+                        </span>
+                        <input
+                          className="settings-text-input"
+                          value={system.gitCommitMessage}
+                          disabled={busy || syncOff}
+                          onChange={(e) =>
+                            setSystem((s) => ({
+                              ...s,
+                              gitCommitMessage: e.target.value,
+                            }))
+                          }
+                          onBlur={(e) => {
+                            const value = e.target.value.trim();
+                            if (value === system.gitCommitMessage.trim()) return;
+                            patchSystem({
+                              gitCommitMessage:
+                                value || DEFAULT_SYSTEM_SETTINGS.gitCommitMessage,
+                            });
+                          }}
+                          placeholder="chore: sync Abyss Gazer data"
+                        />
+                      </label>
+                      <div className="settings-row settings-row-stack">
+                        <span className="settings-row-label">
+                          {t("settings.gitProxy")}
+                        </span>
+                        <input
+                          className="settings-text-input"
+                          value={system.gitProxy ?? ""}
+                          disabled={busy || syncOff}
+                          onChange={(e) =>
+                            setSystem((s) => ({
+                              ...s,
+                              gitProxy: e.target.value,
+                            }))
+                          }
+                          onBlur={(e) => {
+                            const value = e.target.value.trim();
+                            const current = (system.gitProxy ?? "").trim();
+                            if (value === current) return;
+                            patchSystem({ gitProxy: value || null });
+                          }}
+                          placeholder={t("settings.gitProxyPlaceholder")}
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                        <p className="settings-field-hint">
+                          {t("settings.gitProxyHint")}
+                        </p>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
