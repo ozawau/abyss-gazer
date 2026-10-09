@@ -232,6 +232,8 @@ struct HabitSnap {
     manual_days: Vec<String>,
     #[serde(rename = "focusStarts")]
     focus_starts: Vec<i64>,
+    #[serde(rename = "weekdays", skip_serializing_if = "Option::is_none")]
+    weekdays: Option<Vec<i64>>,
 }
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -242,6 +244,7 @@ struct TaskRow {
     category_id: Option<String>,
     sort_order: i64,
     created_at: i64,
+    checkin_weekdays: Option<String>,
 }
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -268,7 +271,7 @@ fn build_snapshot(
     {
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, parent_id, category_id, sort_order, created_at FROM tasks",
+                "SELECT id, title, parent_id, category_id, sort_order, created_at, checkin_weekdays FROM tasks",
             )
             .map_err(|err| err.to_string())?;
         let rows = stmt
@@ -280,6 +283,7 @@ fn build_snapshot(
                     category_id: row.get(3)?,
                     sort_order: row.get(4)?,
                     created_at: row.get(5)?,
+                    checkin_weekdays: row.get(6)?,
                 })
             })
             .map_err(|err| err.to_string())?;
@@ -368,9 +372,32 @@ fn build_snapshot(
                 id: task.id.clone(),
                 title: task.title.clone(),
                 created_at: task.created_at,
+                weekdays: parse_checkin_weekdays(task.checkin_weekdays.clone()),
             })
             .collect(),
     })
+}
+
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn parse_checkin_weekdays(raw: Option<String>) -> Option<Vec<i64>> {
+    let raw = raw?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let list = value.as_array()?;
+    let mut days = Vec::<i64>::new();
+    for item in list {
+        let Some(day) = item.as_i64() else {
+            continue;
+        };
+        if (0..=6).contains(&day) && !days.contains(&day) {
+            days.push(day);
+        }
+    }
+    days.sort_unstable();
+    if days.is_empty() || days.len() == 7 {
+        None
+    } else {
+        Some(days)
+    }
 }
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]

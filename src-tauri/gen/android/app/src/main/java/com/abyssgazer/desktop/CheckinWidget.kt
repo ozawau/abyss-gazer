@@ -314,6 +314,7 @@ internal data class CheckinBoard(
                                         }
                                     }
                                 },
+                                weekdays = weekdaysOf(item.optJSONArray("weekdays")),
                             ),
                         )
                     }
@@ -331,16 +332,20 @@ internal data class CheckinBoard(
         private fun compose(snapshot: Snapshot?): CheckinBoard {
             val zh = useChinese(snapshot?.language)
             val today = startOfDay(System.currentTimeMillis())
-            val habits = snapshot?.habits.orEmpty().mapNotNull { habit ->
+            val source = snapshot?.habits.orEmpty()
+            val habits = source.mapNotNull { habit ->
                 val created = startOfDay(habit.createdAt)
-                if (created > today) return@mapNotNull null
-                val checkedDays = checkedDayKeys(habit)
+                if (created > today || !scheduled(habit, today)) return@mapNotNull null
                 val todayKey = dayKey(today)
                 val manualToday = habit.manualDays.contains(todayKey)
                 val autoToday = habit.focusStarts.any { dayKey(it) == todayKey }
-                val done = checkedDays.contains(todayKey)
+                val done = checkedOn(habit, today)
                 val (current, _) = streak(created, today) { day ->
-                    checkedDays.contains(dayKey(day))
+                    when {
+                        !scheduled(habit, day) -> DayMark.SKIP
+                        checkedOn(habit, day) -> DayMark.HIT
+                        else -> DayMark.MISS
+                    }
                 }
                 HabitToday(habit.id, habit.title, done, manualToday, autoToday, current)
             }
@@ -374,6 +379,8 @@ internal data class CheckinBoard(
                 nudge = nudge(zh, total, left, perfect),
                 emptyMessage = if (snapshot == null) {
                     if (zh) "打开一次 Abyss Gazer，这里会显示今天的打卡。" else "Open Abyss Gazer once to show today’s check-ins."
+                } else if (source.isNotEmpty() && habits.isEmpty()) {
+                    if (zh) "今天没有需要打卡的习惯。" else "No habits are scheduled today."
                 } else {
                     val category = snapshot.checkinCategoryName.trim()
                     when {
@@ -415,10 +422,13 @@ internal data class CheckinBoard(
             val applicable = habits.map { it to startOfDay(it.createdAt) }.filter { it.second <= today }
             if (applicable.isEmpty()) return Streak(0, 0)
             val earliest = applicable.minOf { it.second }
-            val checked = applicable.associate { (habit, _) -> habit to checkedDayKeys(habit) }
             return streak(earliest, today) { day ->
-                val due = applicable.filter { it.second <= day }
-                due.isNotEmpty() && due.all { (habit, _) -> checked.getValue(habit).contains(dayKey(day)) }
+                val due = applicable.filter { it.second <= day && scheduled(it.first, day) }
+                when {
+                    due.isEmpty() -> DayMark.SKIP
+                    due.all { (habit, _) -> checkedOn(habit, day) } -> DayMark.HIT
+                    else -> DayMark.MISS
+                }
             }.let { Streak(it.first, it.second) }
         }
 
@@ -428,20 +438,49 @@ internal data class CheckinBoard(
             return days
         }
 
-        private fun streak(start: Long, today: Long, isOn: (Long) -> Boolean): Pair<Int, Int> {
+        private enum class DayMark { HIT, MISS, SKIP }
+
+        private fun weekdaysOf(raw: JSONArray?): Set<Int>? {
+            if (raw == null) return null
+            val days = buildSet {
+                for (index in 0 until raw.length()) {
+                    if (raw.isNull(index)) continue
+                    val day = raw.optInt(index, -1)
+                    if (day in 0..6) add(day)
+                }
+            }
+            return if (days.isEmpty() || days.size == 7) null else days
+        }
+
+        private fun scheduled(habit: HabitSnap, day: Long): Boolean {
+            val days = habit.weekdays ?: return true
+            val weekday = Calendar.getInstance().apply { timeInMillis = day }.get(Calendar.DAY_OF_WEEK) - 1
+            return days.contains(weekday)
+        }
+
+        private fun checkedOn(habit: HabitSnap, day: Long): Boolean {
+            if (!scheduled(habit, day)) return false
+            return checkedDayKeys(habit).contains(dayKey(day))
+        }
+
+        private fun streak(start: Long, today: Long, mark: (Long) -> DayMark): Pair<Int, Int> {
             var cursor = start
             if (cursor > today) return 0 to 0
             var run = 0
             var best = 0
             var current = 0
             while (cursor <= today) {
-                if (isOn(cursor)) {
-                    run += 1
-                    if (run > best) best = run
-                    current = run
-                } else if (cursor != today) {
-                    run = 0
-                    current = 0
+                when (mark(cursor)) {
+                    DayMark.HIT -> {
+                        run += 1
+                        if (run > best) best = run
+                        current = run
+                    }
+                    DayMark.SKIP -> Unit
+                    DayMark.MISS -> if (cursor != today) {
+                        run = 0
+                        current = 0
+                    }
                 }
                 cursor = addDays(cursor, 1)
             }
@@ -662,6 +701,7 @@ private data class HabitSnap(
     val createdAt: Long,
     val manualDays: Set<String>,
     val focusStarts: List<Long>,
+    val weekdays: Set<Int>? = null,
 )
 
 private data class HabitToday(

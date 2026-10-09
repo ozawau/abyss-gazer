@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Category, Task } from "../lib/api";
 import { useDismissOnAndroidBack } from "../lib/androidBack";
+import { CheckinWeekdayFields } from "./CheckinWeekdayFields";
+import { encodeCheckinWeekdays, parseCheckinWeekdays } from "../lib/checkinSchedule";
 import { OptionPicker } from "./OptionPicker";
 import { formatDateTime } from "../lib/dateDisplay";
 import { WEEKDAY_FULL } from "../lib/i18n";
@@ -27,6 +29,7 @@ export interface TaskDetailSave {
   due_at: number | null;
   start_at: number | null;
   recurrence: string | null;
+  checkin_weekdays?: string | null;
 }
 
 interface TaskDetailDialogProps {
@@ -40,6 +43,7 @@ interface TaskDetailDialogProps {
   onRequestEditCategory?: (category: Category) => void;
   /** Set after a category is created from this dialog. */
   pickedCategory?: { id: string; token: number } | null;
+  checkinCategoryId?: string | null;
 }
 
 /** Convert unix ms → value for <input type="datetime-local">. */
@@ -86,6 +90,7 @@ export function TaskDetailDialog({
   onRequestCreateCategory,
   onRequestEditCategory,
   pickedCategory,
+  checkinCategoryId = null,
 }: TaskDetailDialogProps) {
   const [title, setTitle] = useState("");
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -104,6 +109,8 @@ export function TaskDetailDialog({
   const [yearDays, setYearDays] = useState<number[]>([1]);
   const [lunarMonths, setLunarMonths] = useState<number[]>([1]);
   const [lunarDays, setLunarDays] = useState<number[]>([5]);
+  const [checkinEveryDay, setCheckinEveryDay] = useState(true);
+  const [checkinDays, setCheckinDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 0]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [subtaskOpen, setSubtaskOpen] = useState(false);
@@ -158,6 +165,9 @@ export function TaskDetailDialog({
     } else {
       setPeriod("none");
     }
+    const checkinDays = parseCheckinWeekdays(task.checkin_weekdays);
+    setCheckinEveryDay(checkinDays == null);
+    setCheckinDays(checkinDays ?? [1, 2, 3, 4, 5, 6, 0]);
     setBusy(false);
     setError(null);
     setSubtaskOpen(false);
@@ -214,6 +224,8 @@ export function TaskDetailDialog({
   const showOrdinal = period === "monthly" && monthMode !== "day";
 
   const isSubtask = !!task.parent_id;
+  const showCheckinDays =
+    !isSubtask && !!checkinCategoryId && categoryId === checkinCategoryId;
   const category = categoryId
     ? categories.find((item) => item.id === categoryId)
     : null;
@@ -239,6 +251,9 @@ export function TaskDetailDialog({
         start_at: fromDatetimeLocalValue(startLocal),
         due_at: fromDatetimeLocalValue(dueLocal),
         recurrence: stampRecurrence(task!.recurrence, draft),
+        ...(showCheckinDays
+          ? { checkin_weekdays: encodeCheckinWeekdays(checkinEveryDay, checkinDays) }
+          : {}),
       });
       onClose();
     } catch (err) {
@@ -500,6 +515,20 @@ export function TaskDetailDialog({
               )
             )}
           </div>
+
+          {showCheckinDays && (
+            <div className="field">
+              <span>{t("checkin.schedule")}</span>
+              <CheckinWeekdayFields
+                everyDay={checkinEveryDay}
+                days={checkinDays}
+                disabled={busy}
+                onEveryDayChange={setCheckinEveryDay}
+                onDaysChange={setCheckinDays}
+              />
+              <p className="task-detail-meta">{t("checkin.scheduleHint")}</p>
+            </div>
+          )}
 
           <label className="field">
             <span>{t("detail.notes")}</span>

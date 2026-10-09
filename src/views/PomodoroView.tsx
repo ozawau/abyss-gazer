@@ -390,15 +390,15 @@ export function PomodoroView({
       prev != null &&
       prev.endsWith(":todo");
 
+    const completingFocus =
+      completed &&
+      phaseRef.current === "focus" &&
+      sessionTaskIdRef.current === selectedTask.id;
     void (async () => {
-      if (
-        completed &&
-        phaseRef.current === "focus" &&
-        sessionTaskIdRef.current === selectedTask.id
-      ) {
+      if (completingFocus) {
         await creditElapsedFocus(selectedTask.id);
       }
-      if ((deleted || completed) && statusRef.current === "running") {
+      if ((deleted || completingFocus) && statusRef.current === "running") {
         if (statusRef.current === "running" && endsAtRef.current != null) {
           const left = secondsUntil(endsAtRef.current);
           remainingRef.current = left;

@@ -114,6 +114,7 @@ interface TasksViewProps {
   categoryFilter: CategoryFilter;
   onCategoryFilterChange: (filter: CategoryFilter) => void;
   dataEpoch: number;
+  checkinCategoryId?: string | null;
 }
 
 const PRIORITY_GROUPS: { id: TaskPriority; label: string }[] = [
@@ -315,6 +316,7 @@ export function TasksView({
   categoryFilter,
   onCategoryFilterChange,
   dataEpoch,
+  checkinCategoryId = null,
 }: TasksViewProps) {
   const { locale, t } = useI18n();
   const today = useLocalToday();
@@ -850,6 +852,9 @@ export function TasksView({
       due_at: input.due_at,
       start_at: input.start_at,
       recurrence: input.recurrence,
+      ...(input.checkin_weekdays !== undefined
+        ? { checkin_weekdays: input.checkin_weekdays }
+        : {}),
     });
     onTasksChange(applyAncestorFields(tasks, next));
     setDetailTask(next);
@@ -1520,6 +1525,7 @@ export function TasksView({
         onRequestCreateCategory={() => openCreateCategory("detail")}
         onRequestEditCategory={openEditCategory}
         pickedCategory={pickedCategory}
+        checkinCategoryId={checkinCategoryId}
       />
 
       <CreateSubtaskDialog

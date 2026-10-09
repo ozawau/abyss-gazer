@@ -37,6 +37,7 @@ export interface Task {
   recurrence: string | null;
   recurrence_source_id: string | null;
   recurrence_occurrence: string | null;
+  checkin_weekdays: string | null;
 }
 
 export interface PomodoroSession {
@@ -87,6 +88,7 @@ export function updateTask(input: {
   due_at?: number | null;
   start_at?: number | null;
   recurrence?: string | null;
+  checkin_weekdays?: string | null;
 }): Promise<Task> {
   const payload: Record<string, unknown> = { id: input.id };
   if (input.title !== undefined) payload.title = input.title;
@@ -100,6 +102,7 @@ export function updateTask(input: {
   if (input.due_at !== undefined) payload.due_at = input.due_at;
   if (input.start_at !== undefined) payload.start_at = input.start_at;
   if (input.recurrence !== undefined) payload.recurrence = input.recurrence;
+  if (input.checkin_weekdays !== undefined) payload.checkin_weekdays = input.checkin_weekdays;
   return afterLocalMutation(invoke("update_task", { input: payload }));
 }
 

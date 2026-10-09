@@ -29,6 +29,7 @@ interface UpcomingTasksViewProps {
   categoryFilter: string;
   onCategoryFilterChange: (filter: string) => void;
   dataEpoch: number;
+  checkinCategoryId?: string | null;
 }
 
 function startOfDayMs(ymd: string): number | null {
@@ -52,6 +53,7 @@ export function UpcomingTasksView({
   categoryFilter,
   onCategoryFilterChange,
   dataEpoch,
+  checkinCategoryId = null,
 }: UpcomingTasksViewProps) {
   const { locale, t } = useI18n();
   const android = isAndroidDevice();
@@ -219,6 +221,9 @@ export function UpcomingTasksView({
       due_at: input.due_at,
       start_at: input.start_at,
       recurrence: input.recurrence,
+      ...(input.checkin_weekdays !== undefined
+        ? { checkin_weekdays: input.checkin_weekdays }
+        : {}),
     });
     onTasksChange(applyAncestorFields(tasks, next));
     setDetailTask(next);
@@ -461,6 +466,7 @@ export function UpcomingTasksView({
         categories={categories}
         onClose={() => setDetailTask(null)}
         onSave={saveTaskDetail}
+        checkinCategoryId={checkinCategoryId}
         onCreateSubtask={async (title) => {
           if (!detailTask) return;
           const created = await createTask({

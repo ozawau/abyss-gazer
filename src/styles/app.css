@@ -672,7 +672,7 @@ html.is-android.is-narrow .sidebar-sync-btn {
   min-height: 10rem;
   display: flex;
   align-items: stretch;
-  gap: 0.25rem;
+  gap: 0;
   padding: 0.5rem 0.2rem 0;
   border-bottom: 1px solid var(--border);
 }
@@ -684,14 +684,16 @@ html.is-android.is-narrow .sidebar-sync-btn {
   flex-direction: column;
   justify-content: flex-end;
   gap: 0.3rem;
+  overflow: visible;
   text-align: center;
 }
 
 .statistics-day small {
-  overflow: hidden;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
   color: var(--text-muted);
   font-size: 0.62rem;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -822,11 +824,10 @@ html.is-android.is-narrow .sidebar-sync-btn {
 .statistics-line-labels small {
   flex: 1 1 0;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   color: var(--text-muted);
   font-size: 0.62rem;
   text-align: center;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -5173,8 +5174,10 @@ html.is-android .gantt-hover-card.is-pinned {
 
 .habit-week-name {
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.1rem;
   padding: 0.35rem 0.55rem;
   font-size: 0.84rem;
 }
@@ -5244,6 +5247,28 @@ html.is-android .gantt-hover-card.is-pinned {
 
 .habit-week-title {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.habit-week-title {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.habit-week-schedule {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

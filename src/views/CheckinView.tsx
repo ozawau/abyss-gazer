@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckinWeekdayFields } from "../components/CheckinWeekdayFields";
 import { HabitCheckinDialog } from "../components/HabitCheckinDialog";
 import { useI18n } from "../components/LocaleProvider";
 import { WEEKDAY_SHORT } from "../lib/i18n";
@@ -12,6 +13,7 @@ import {
   saveHabitCheckin,
   SystemSettings,
   Task,
+  updateTask,
 } from "../lib/api";
 import type { WeekStartsOn } from "../lib/api";
 import {
@@ -26,7 +28,13 @@ import {
   startOfLocalDay,
   weekdayShortLabels,
 } from "../lib/calendar";
+import { useDismissOnAndroidBack } from "../lib/androidBack";
 import { useCnHolidayRevision } from "../lib/cnHolidayData";
+import {
+  encodeCheckinWeekdays,
+  habitScheduledOn,
+  parseCheckinWeekdays,
+} from "../lib/checkinSchedule";
 import { statutoryDayInfo } from "../lib/cnStatutoryDay";
 import { formatLunarDayShort } from "../lib/dateDisplay";
 import { descendantIds } from "../lib/taskTree";
@@ -42,6 +50,7 @@ interface CheckinViewProps {
   systemSettings: SystemSettings;
   weekStartsOn: WeekStartsOn;
   dataEpoch: number;
+  onTasksChange: (tasks: Task[]) => void;
 }
 
 type CheckinMode = "month" | "week";
@@ -71,8 +80,10 @@ interface StreakSpan {
   best: number;
 }
 
-/** Current run ending today, plus the longest run since `start`. An unchecked today does not break the current run. */
-function streakSpan(start: Date, today: Date, isOn: (day: Date) => boolean): StreakSpan {
+type DayRole = "hit" | "miss" | "skip";
+
+/** Current run ending today, plus the longest run since `start`. An unchecked today does not break the current run. Days the habit is not scheduled neither count nor break the run. */
+function streakSpan(start: Date, today: Date, roleOf: (day: Date) => DayRole): StreakSpan {
   const end = startOfLocalDay(today).getTime();
   let cursor = startOfLocalDay(start);
   if (cursor.getTime() > end) return { current: 0, best: 0 };
@@ -81,11 +92,12 @@ function streakSpan(start: Date, today: Date, isOn: (day: Date) => boolean): Str
   let current = 0;
   while (cursor.getTime() <= end) {
     const isToday = cursor.getTime() === end;
-    if (isOn(cursor)) {
+    const role = roleOf(cursor);
+    if (role === "hit") {
       run += 1;
       if (run > best) best = run;
       current = run;
-    } else if (!isToday) {
+    } else if (role === "miss" && !isToday) {
       run = 0;
       current = 0;
     }
@@ -94,15 +106,22 @@ function streakSpan(start: Date, today: Date, isOn: (day: Date) => boolean): Str
   return { current, best };
 }
 
+function habitApplies(habit: Task, day: Date): boolean {
+  const dayMs = startOfLocalDay(day).getTime();
+  const createdMs = startOfLocalDay(new Date(habit.created_at)).getTime();
+  return dayMs >= createdMs && habitScheduledOn(habit.checkin_weekdays, day);
+}
+
 function habitStreakSpan(
   habit: Task,
   manual: Set<string>,
   auto: Set<string>,
   today: Date,
 ): StreakSpan {
-  return streakSpan(new Date(habit.created_at), today, (day) =>
-    dayChecked(habit.id, day, manual, auto),
-  );
+  return streakSpan(new Date(habit.created_at), today, (day) => {
+    if (!habitScheduledOn(habit.checkin_weekdays, day)) return "skip";
+    return dayChecked(habit.id, day, manual, auto) ? "hit" : "miss";
+  });
 }
 
 function perfectStreakSpan(
@@ -117,25 +136,11 @@ function perfectStreakSpan(
     const created = startOfLocalDay(new Date(habit.created_at)).getTime();
     if (created < earliest) earliest = created;
   }
-  return streakSpan(new Date(earliest), today, (day) =>
-    dayIsPerfect(habits, day, manual, auto),
-  );
-}
-
-function dayIsPerfect(
-  habits: Task[],
-  day: Date,
-  manual: Set<string>,
-  auto: Set<string>,
-): boolean {
-  const dayMs = startOfLocalDay(day).getTime();
-  const applicable = habits.filter(
-    (habit) => dayMs >= startOfLocalDay(new Date(habit.created_at)).getTime(),
-  );
-  return (
-    applicable.length > 0 &&
-    applicable.every((habit) => dayChecked(habit.id, day, manual, auto))
-  );
+  return streakSpan(new Date(earliest), today, (day) => {
+    const applicable = habits.filter((habit) => habitApplies(habit, day));
+    if (applicable.length === 0) return "skip";
+    return applicable.every((habit) => dayChecked(habit.id, day, manual, auto)) ? "hit" : "miss";
+  });
 }
 
 function checkinTotals(
@@ -156,10 +161,7 @@ function checkinTotals(
   let checked = 0;
   let missed = 0;
   while (cursor.getTime() <= end) {
-    const dayMs = cursor.getTime();
-    const applicable = habits.filter(
-      (habit) => startOfLocalDay(new Date(habit.created_at)).getTime() <= dayMs,
-    );
+    const applicable = habits.filter((habit) => habitApplies(habit, cursor));
     if (applicable.length > 0) {
       let allChecked = true;
       for (const habit of applicable) {
@@ -181,6 +183,7 @@ export function CheckinView({
   systemSettings,
   weekStartsOn,
   dataEpoch,
+  onTasksChange,
 }: CheckinViewProps) {
   const { locale, t } = useI18n();
   useCnHolidayRevision();
@@ -195,6 +198,7 @@ export function CheckinView({
   const [streakManual, setStreakManual] = useState<Set<string>>(() => new Set());
   const [streakSessions, setStreakSessions] = useState<PomodoroSession[]>([]);
   const [editor, setEditor] = useState<{ habit: Task; day: Date } | null>(null);
+  const [scheduleHabit, setScheduleHabit] = useState<Task | null>(null);
   const pendingHabitRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -405,8 +409,7 @@ export function CheckinView({
   function markFor(task: Task, day: Date): Mark | null {
     const dayMs = startOfLocalDay(day).getTime();
     if (dayMs > today.getTime()) return null;
-    const createdMs = startOfLocalDay(new Date(task.created_at)).getTime();
-    if (dayMs < createdMs) return null;
+    if (!habitApplies(task, day)) return null;
     const key = checkinKey(task.id, dayKey(day));
     return checked.has(key) || autoChecked.has(key) ? "checked" : "missed";
   }
@@ -497,6 +500,21 @@ export function CheckinView({
         return next;
       });
       setEditor(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveSchedule(value: string | null) {
+    if (!scheduleHabit || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const next = await updateTask({ id: scheduleHabit.id, checkin_weekdays: value });
+      onTasksChange(tasks.map((task) => (task.id === next.id ? next : task)));
+      setScheduleHabit(null);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -629,6 +647,7 @@ export function CheckinView({
             streaks={streaks.byHabit}
             perfectStreak={streaks.perfect}
             onOpen={openCheckin}
+            onSchedule={setScheduleHabit}
           />
         </>
       )}
@@ -660,6 +679,83 @@ export function CheckinView({
         }}
         onSave={(input) => void saveCheckin(input)}
       />
+      <CheckinScheduleDialog
+        habit={scheduleHabit}
+        busy={saving}
+        onCancel={() => {
+          if (!saving) setScheduleHabit(null);
+        }}
+        onSave={(value) => void saveSchedule(value)}
+      />
+    </div>
+  );
+}
+
+function CheckinScheduleDialog({
+  habit,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  habit: Task | null;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (value: string | null) => void;
+}) {
+  const { t } = useI18n();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const parsed = habit ? parseCheckinWeekdays(habit.checkin_weekdays) : null;
+  const [everyDay, setEveryDay] = useState(parsed == null);
+  const [days, setDays] = useState<number[]>(parsed ?? [1, 2, 3, 4, 5, 6, 0]);
+  useDismissOnAndroidBack(habit != null, () => {
+    if (!busy) onCancel();
+  }, rootRef);
+
+  useEffect(() => {
+    const next = habit ? parseCheckinWeekdays(habit.checkin_weekdays) : null;
+    setEveryDay(next == null);
+    setDays(next ?? [1, 2, 3, 4, 5, 6, 0]);
+  }, [habit]);
+
+  if (!habit) return null;
+
+  return (
+    <div ref={rootRef} className="modal-backdrop" role="presentation" onClick={() => !busy && onCancel()}>
+      <div
+        className="modal-card task-detail-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="habit-schedule-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!busy) onSave(encodeCheckinWeekdays(everyDay, days));
+          }}
+        >
+          <h2 id="habit-schedule-title">{habit.title}</h2>
+          <label className="field">
+            <span>{t("checkin.schedule")}</span>
+            <CheckinWeekdayFields
+              everyDay={everyDay}
+              days={days}
+              disabled={busy}
+              onEveryDayChange={setEveryDay}
+              onDaysChange={setDays}
+            />
+          </label>
+          <p className="task-detail-meta">{t("checkin.scheduleHint")}</p>
+          <div className="modal-actions">
+            <button type="button" className="secondary-btn" disabled={busy} onClick={onCancel}>
+              {t("common.cancel")}
+            </button>
+            <button type="submit" className="primary-btn" disabled={busy}>
+              {t("common.save")}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -819,6 +915,16 @@ function MonthCheckins({
   );
 }
 
+function HabitScheduleLabel({ task }: { task: Task }) {
+  const { locale } = useI18n();
+  const days = parseCheckinWeekdays(task.checkin_weekdays);
+  if (!days) return null;
+  const labels = [1, 2, 3, 4, 5, 6, 0]
+    .filter((day) => days.includes(day))
+    .map((day) => WEEKDAY_SHORT[locale][day] ?? "");
+  return <span className="habit-week-schedule">{labels.join(locale === "zh" ? "、" : ", ")}</span>;
+}
+
 function RecordCell({ current, best }: StreakSpan) {
   const { t } = useI18n();
   return (
@@ -848,6 +954,7 @@ function WeekCheckins({
   streaks,
   perfectStreak,
   onOpen,
+  onSchedule,
 }: {
   days: Date[];
   today: Date;
@@ -857,6 +964,7 @@ function WeekCheckins({
   detailNote: (task: Task, day: Date) => string;
   streaks: Map<string, StreakSpan>;
   perfectStreak: StreakSpan;
+  onSchedule: (task: Task) => void;
   onOpen: (task: Task, day: Date) => void;
 }) {
   const { locale, t } = useI18n();
@@ -886,8 +994,16 @@ function WeekCheckins({
         const streak = streaks.get(task.id) ?? { current: 0, best: 0 };
         return (
         <div key={task.id} className="habit-week-row" role="row">
-          <div className="habit-week-name" title={task.title}>
-            <span className="habit-week-title">{task.title}</span>
+          <div className="habit-week-name">
+            <button
+              type="button"
+              className="habit-week-title"
+              title={t("checkin.scheduleHint")}
+              onClick={() => onSchedule(task)}
+            >
+              {task.title}
+            </button>
+            <HabitScheduleLabel task={task} />
           </div>
           <RecordCell current={streak.current} best={streak.best} />
           {days.map((day) => {

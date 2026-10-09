@@ -556,6 +556,7 @@ function MainApp() {
               categoryFilter={tasksCategoryFilter}
               onCategoryFilterChange={setTasksCategoryFilter}
               dataEpoch={dataEpoch}
+              checkinCategoryId={systemSettings.checkinCategoryId}
             />
           </ViewSlot>
         )}
@@ -570,6 +571,7 @@ function MainApp() {
               categoryFilter={upcomingCategoryFilter}
               onCategoryFilterChange={setUpcomingCategoryFilter}
               dataEpoch={dataEpoch}
+              checkinCategoryId={systemSettings.checkinCategoryId}
             />
           </ViewSlot>
         )}
@@ -584,6 +586,7 @@ function MainApp() {
               categoryFilter={completedCategoryFilter}
               onCategoryFilterChange={setCompletedCategoryFilter}
               dataEpoch={dataEpoch}
+              checkinCategoryId={systemSettings.checkinCategoryId}
             />
           </ViewSlot>
         )}
@@ -602,6 +605,7 @@ function MainApp() {
               categoryFilter={templatesCategoryFilter}
               onCategoryFilterChange={setTemplatesCategoryFilter}
               dataEpoch={dataEpoch}
+              checkinCategoryId={systemSettings.checkinCategoryId}
             />
           </ViewSlot>
         )}
@@ -642,6 +646,7 @@ function MainApp() {
               systemSettings={systemSettings}
               weekStartsOn={systemSettings.weekStartsOn}
               dataEpoch={dataEpoch}
+              onTasksChange={setTasks}
             />
           </ViewSlot>
         )}

@@ -23,6 +23,8 @@ pub struct Task {
     pub recurrence: Option<String>,
     pub recurrence_source_id: Option<String>,
     pub recurrence_occurrence: Option<String>,
+    /// `null` means the habit is due every day. Otherwise a JSON array of weekday numbers, Sunday = 0.
+    pub checkin_weekdays: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +57,9 @@ pub struct UpdateTaskInput {
     /// Missing = leave unchanged; `null` = clear; string = set.
     #[serde(default)]
     pub recurrence: Option<Option<String>>,
+    /// Missing = leave unchanged; `null` = every day; string = weekday list.
+    #[serde(default)]
+    pub checkin_weekdays: Option<Option<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,13 +134,14 @@ fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         recurrence: row.get(14)?,
         recurrence_source_id: row.get(15)?,
         recurrence_occurrence: row.get(16)?,
-        completed_pomodoros: row.get(17)?,
+        checkin_weekdays: row.get(17)?,
+        completed_pomodoros: row.get(18)?,
     })
 }
 
 const TASK_SELECT: &str = "SELECT t.id, t.title, t.notes, t.status, t.priority, t.sort_order,
        t.parent_id, t.category_id, t.estimate_pomodoros, t.due_at, t.start_at, t.completed_at, t.created_at, t.updated_at,
-       t.recurrence, t.recurrence_source_id, t.recurrence_occurrence,
+       t.recurrence, t.recurrence_source_id, t.recurrence_occurrence, t.checkin_weekdays,
        CAST(COALESCE((SELECT SUM(p.credit) FROM pomodoro_sessions p
          WHERE p.kind = 'focus' AND p.completed = 1
            AND p.task_id IN (
@@ -451,6 +457,12 @@ pub fn update_task(
         Some(Some(raw)) => Some(canonical_recurrence(&raw)?),
     };
 
+    let checkin_weekdays = match input.checkin_weekdays {
+        None => existing.checkin_weekdays.clone(),
+        Some(None) => None,
+        Some(Some(raw)) => canonical_checkin_weekdays(&raw)?,
+    };
+
     let updated_at = monotonic_updated_at(existing.updated_at);
     let completed_at = if status == "done" {
         if previous_status == "done" {
@@ -465,8 +477,8 @@ pub fn update_task(
     conn.execute(
         "UPDATE tasks SET title = ?1, notes = ?2, status = ?3, priority = ?4, sort_order = ?5,
          category_id = ?6, estimate_pomodoros = ?7, due_at = ?8, start_at = ?9, completed_at = ?10,
-         recurrence = ?11, updated_at = ?12
-         WHERE id = ?13",
+         recurrence = ?11, checkin_weekdays = ?12, updated_at = ?13
+         WHERE id = ?14",
         rusqlite::params![
             title,
             notes,
@@ -479,6 +491,7 @@ pub fn update_task(
             start_at,
             completed_at,
             recurrence,
+            checkin_weekdays,
             updated_at,
             input.id
         ],
@@ -770,6 +783,37 @@ fn read_counts(
         _ => return Err("Invalid recurrence".into()),
     };
     Ok((direction, indexes))
+}
+
+/// `None` means every day. A full week is stored the same way.
+fn canonical_checkin_weekdays(raw: &str) -> Result<Option<String>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|_| "Invalid check-in weekdays".to_string())?;
+    let list = value
+        .as_array()
+        .ok_or_else(|| "Invalid check-in weekdays".to_string())?;
+    if list.is_empty() {
+        return Err("Invalid check-in weekdays".into());
+    }
+    let mut days = Vec::<i64>::new();
+    for item in list {
+        let day = item
+            .as_i64()
+            .ok_or_else(|| "Invalid check-in weekdays".to_string())?;
+        if !(0..=6).contains(&day) {
+            return Err("Invalid check-in weekdays".into());
+        }
+        if !days.contains(&day) {
+            days.push(day);
+        }
+    }
+    days.sort_unstable();
+    if days.len() == 7 {
+        return Ok(None);
+    }
+    Ok(Some(
+        serde_json::to_string(&days).map_err(|err| err.to_string())?,
+    ))
 }
 
 fn canonical_recurrence(raw: &str) -> Result<String, String> {
@@ -1097,5 +1141,13 @@ mod tests {
         assert!(canonical_recurrence(r#"{"kind":"interval","days":0}"#).is_err());
         assert!(canonical_recurrence(r#"{"kind":"weekly","weekdays":[]}"#).is_err());
         assert!(canonical_recurrence(r#"{"kind":"yearly","months":[1,13],"days":[1]}"#).is_err());
+        assert_eq!(
+            super::canonical_checkin_weekdays("[1,3,1]").unwrap().as_deref(),
+            Some("[1,3]")
+        );
+        assert!(super::canonical_checkin_weekdays("[0,1,2,3,4,5,6]")
+            .unwrap()
+            .is_none());
+        assert!(super::canonical_checkin_weekdays("[]").is_err());
     }
 }

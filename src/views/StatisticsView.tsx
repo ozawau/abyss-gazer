@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../components/LocaleProvider";
 import {
   Category,
@@ -10,6 +10,7 @@ import {
   Task,
 } from "../lib/api";
 import { addDays, dayKey, startOfLocalDay } from "../lib/calendar";
+import { habitScheduledOn } from "../lib/checkinSchedule";
 import { descendantIds } from "../lib/taskTree";
 
 type RangeKey = "7d" | "30d" | "90d" | "all";
@@ -69,6 +70,61 @@ function shortMinutes(minutes: number, t: (key: any, vars?: any) => string): str
 
 function ChartEmpty({ label }: { label: string }) {
   return <p className="statistics-empty">{label}</p>;
+}
+
+/** Days between two shown labels. 1 keeps every day; 2 shows every other day. */
+function axisLabelStep(count: number, chartWidth: number, labelWidth: number): number {
+  if (count <= 1 || chartWidth <= 0) return 1;
+  const slot = chartWidth / count;
+  if (slot >= labelWidth) return 1;
+  return Math.ceil(labelWidth / slot);
+}
+
+function axisLabelIndexes(count: number, step: number): number[] {
+  if (count <= 0) return [];
+  const indexes: number[] = [];
+  for (let index = 0; index < count; index += step) indexes.push(index);
+  const last = count - 1;
+  const previous = indexes[indexes.length - 1];
+  if (previous !== last) {
+    if (last - previous < step) indexes.pop();
+    indexes.push(last);
+  }
+  return indexes;
+}
+
+function useChartAxisLabels(count: number, labels: string[]) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState<number[]>(() => axisLabelIndexes(count, count <= 14 ? 1 : Math.ceil(count / 12)));
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    let canvas: HTMLCanvasElement | null = null;
+    const update = () => {
+      const style = getComputedStyle(node);
+      const width = node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      if (width <= 0) return;
+      const probe = node.querySelector("small");
+      const font = probe ? getComputedStyle(probe).font : "10px sans-serif";
+      canvas ??= document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      let labelWidth = 32;
+      if (context) {
+        context.font = font;
+        for (const label of labels) labelWidth = Math.max(labelWidth, context.measureText(label).width);
+      }
+      const next = axisLabelIndexes(count, axisLabelStep(count, width, labelWidth + 8));
+      setShown((current) => (current.length === next.length && current.every((value, index) => value === next[index]) ? current : next));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [count, labels]);
+
+  const visible = useMemo(() => new Set(shown), [shown]);
+  return { ref, visible };
 }
 
 export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsViewProps) {
@@ -181,6 +237,7 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
     for (const task of habit) {
       const habitStart = Math.max(startMs, startOfLocalDay(new Date(task.created_at)).getTime());
       for (let cursor = startOfLocalDay(new Date(habitStart)); cursor < end && cursor <= today; cursor = addDays(cursor, 1)) {
+        if (!habitScheduledOn(task.checkin_weekdays, cursor)) continue;
         applicable += 1;
         if (checkins.has(`${task.id}|${dayKey(cursor)}`) || autoCheckins.has(`${task.id}|${dayKey(cursor)}`)) checked += 1;
       }
@@ -212,6 +269,7 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
       let checked = 0;
       const family = new Set([habit.id, ...descendantIds(habit.id, tasks)]);
       for (let cursor = startOfLocalDay(new Date(habitStart)); cursor < end && cursor <= today; cursor = addDays(cursor, 1)) {
+        if (!habitScheduledOn(habit.checkin_weekdays, cursor)) continue;
         const key = dayKey(cursor);
         applicable += 1;
         const auto = visibleSessions.some((session) => session.kind === "focus" && session.completed && family.has(session.task_id) && dayKey(new Date(session.started_at)) === key);
@@ -221,6 +279,9 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
     }).sort((a, b) => b.rate - a.rate || b.checked - a.checked);
   }, [autoCheckins, checkins, end, startMs, systemSettings.checkinCategoryId, tasks, today, visibleSessions, visibleTasks]);
 
+  const axisLabels = useMemo(() => days.map((point) => point.label), [days]);
+  const taskAxis = useChartAxisLabels(days.length, axisLabels);
+  const focusAxis = useChartAxisLabels(days.length, axisLabels);
   const maxTask = Math.max(1, ...days.flatMap((point) => [point.created, point.completed]));
   const maxFocus = Math.max(1, ...days.map((point) => point.focusMinutes));
   const focusLinePoints = days.map((point, index) => {
@@ -267,14 +328,14 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
         <div><span>{t("statistics.checkinRate")}</span><strong>{summary.applicable ? `${Math.round(summary.checkinRate * 100)}%` : "—"}</strong></div>
       </section>
       <div className="statistics-grid">
-        <section className="statistics-panel statistics-panel-wide"><h2>{t("statistics.createdVsCompleted")}</h2><div className="statistics-chart statistics-bars" role="img" aria-label={t("statistics.createdVsCompleted")}>
-          {days.map((point) => <div className="statistics-day" key={point.key}><div className="statistics-bar-pair">
+        <section className="statistics-panel statistics-panel-wide"><h2>{t("statistics.createdVsCompleted")}</h2><div ref={taskAxis.ref} className="statistics-chart statistics-bars" role="img" aria-label={t("statistics.createdVsCompleted")}>
+          {days.map((point, index) => <div className="statistics-day" key={point.key}><div className="statistics-bar-pair">
             <span className="statistics-bar-hit" role="img" tabIndex={0} aria-label={`${point.label} ${t("statistics.created")}: ${point.created}`} onPointerEnter={() => showBarTooltip({ chart: "tasks", key: `${point.key}-created`, label: point.label, title: t("statistics.created"), value: String(point.created), secondary: `${t("statistics.completed")}: ${point.completed}` })} onPointerLeave={hideBarTooltip} onFocus={() => setBarTooltip({ chart: "tasks", key: `${point.key}-created`, label: point.label, title: t("statistics.created"), value: String(point.created), secondary: `${t("statistics.completed")}: ${point.completed}` })} onBlur={hideBarTooltip}><i className="bar-created" style={{ height: `${(point.created / maxTask) * 100}%` }} /></span>
             <span className="statistics-bar-hit" role="img" tabIndex={0} aria-label={`${point.label} ${t("statistics.completed")}: ${point.completed}`} onPointerEnter={() => showBarTooltip({ chart: "tasks", key: `${point.key}-completed`, label: point.label, title: t("statistics.completed"), value: String(point.completed), secondary: `${t("statistics.created")}: ${point.created}` })} onPointerLeave={hideBarTooltip} onFocus={() => setBarTooltip({ chart: "tasks", key: `${point.key}-completed`, label: point.label, title: t("statistics.completed"), value: String(point.completed), secondary: `${t("statistics.created")}: ${point.created}` })} onBlur={hideBarTooltip}><i className="bar-completed" style={{ height: `${(point.completed / maxTask) * 100}%` }} /></span>
-          </div><small>{point.label}</small></div>)}
+          </div><small style={{ visibility: taskAxis.visible.has(index) ? "visible" : "hidden" }}>{point.label}</small></div>)}
           {barTooltip?.chart === "tasks" && <div className="statistics-chart-tooltip" role="status"><strong>{barTooltip.label}</strong><span>{barTooltip.title}: {barTooltip.value}</span><span>{barTooltip.secondary}</span></div>}
         </div><div className="statistics-legend"><span><i className="legend-created" />{t("statistics.created")}</span><span><i className="legend-completed" />{t("statistics.completed")}</span></div></section>
-        <section className="statistics-panel statistics-panel-wide"><h2>{t("statistics.focusTrend")}</h2><div className="statistics-chart statistics-line-chart" role="img" aria-label={t("statistics.focusTrend")}>
+        <section className="statistics-panel statistics-panel-wide"><h2>{t("statistics.focusTrend")}</h2><div ref={focusAxis.ref} className="statistics-chart statistics-line-chart" role="img" aria-label={t("statistics.focusTrend")}>
           <svg className="statistics-line-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
             <line className="statistics-line-axis" x1="0" y1="92" x2="100" y2="92" />
             <polyline className="statistics-line-path" points={focusLinePoints.map((point) => `${point.x},${point.y}`).join(" ")} />
@@ -285,7 +346,7 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
           <div className="statistics-line-hit-layer">
             {days.map((point) => <span className="statistics-line-hit" key={point.key} role="img" tabIndex={0} aria-label={`${point.label} ${t("statistics.focusMinutes")}: ${Math.round(point.focusMinutes)}`} onPointerEnter={() => showBarTooltip({ chart: "focus", key: point.key, label: point.label, title: t("statistics.focusMinutes"), value: `${Math.round(point.focusMinutes)} ${t("statistics.minutes")}`, secondary: `${t("statistics.focusPomodoros")}: ${point.focusPomodoros.toFixed(1)}` })} onPointerLeave={hideBarTooltip} onFocus={() => setBarTooltip({ chart: "focus", key: point.key, label: point.label, title: t("statistics.focusMinutes"), value: `${Math.round(point.focusMinutes)} ${t("statistics.minutes")}`, secondary: `${t("statistics.focusPomodoros")}: ${point.focusPomodoros.toFixed(1)}` })} onBlur={hideBarTooltip} />)}
           </div>
-          <div className="statistics-line-labels" aria-hidden="true">{days.map((point) => <small key={point.key}>{point.label}</small>)}</div>
+          <div className="statistics-line-labels" aria-hidden="true">{days.map((point, index) => <small key={point.key} style={{ visibility: focusAxis.visible.has(index) ? "visible" : "hidden" }}>{point.label}</small>)}</div>
           {barTooltip?.chart === "focus" && <div className="statistics-chart-tooltip" role="status"><strong>{barTooltip.label}</strong><span>{barTooltip.title}: {barTooltip.value}</span><span>{barTooltip.secondary}</span></div>}
         </div><p className="statistics-chart-note">{t("statistics.focusSummary", { minutes: Math.round(summary.focusMinutes), pomodoros: summary.focusPomodoros.toFixed(1) })}</p></section>
         <section className="statistics-panel"><h2>{t("statistics.categoryBreakdown")}</h2>{categoryStats.length === 0 ? <ChartEmpty label={t("statistics.noData")} /> : <div className="statistics-category-list">{categoryStats.map((row) => { const total = row.done + row.open; return <div className="statistics-category-row" key={row.name}><div className="statistics-row-label"><span>{row.name}</span><small>{total}</small></div><div className="statistics-stack"><i className="stack-done" style={{ width: `${(row.done / total) * 100}%` }} /><i className="stack-open" style={{ width: `${(row.open / total) * 100}%` }} /></div><small>{row.done}/{total}</small></div>; })}</div>}<div className="statistics-legend"><span><i className="legend-completed" />{t("statistics.completed")}</span><span><i className="legend-open" />{t("statistics.open")}</span></div></section>

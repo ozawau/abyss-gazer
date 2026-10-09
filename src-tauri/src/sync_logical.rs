@@ -38,6 +38,8 @@ pub struct SyncTask {
     pub recurrence_source_id: Option<String>,
     #[serde(default)]
     pub recurrence_occurrence: Option<String>,
+    #[serde(default)]
+    pub checkin_weekdays: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -242,15 +244,16 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
     conn.execute(
         "INSERT INTO tasks (id, title, notes, status, priority, sort_order, parent_id, category_id,
          estimate_pomodoros, due_at, start_at, completed_at, created_at, updated_at,
-         recurrence, recurrence_source_id, recurrence_occurrence)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+         recurrence, recurrence_source_id, recurrence_occurrence, checkin_weekdays)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
          ON CONFLICT(id) DO UPDATE SET
          title=excluded.title, notes=excluded.notes, status=excluded.status, priority=excluded.priority,
          sort_order=excluded.sort_order, parent_id=excluded.parent_id, category_id=excluded.category_id,
          estimate_pomodoros=excluded.estimate_pomodoros, due_at=excluded.due_at, start_at=excluded.start_at,
          completed_at=excluded.completed_at, created_at=excluded.created_at, updated_at=excluded.updated_at,
          recurrence=excluded.recurrence, recurrence_source_id=excluded.recurrence_source_id,
-         recurrence_occurrence=excluded.recurrence_occurrence",
+         recurrence_occurrence=excluded.recurrence_occurrence,
+         checkin_weekdays=excluded.checkin_weekdays",
         rusqlite::params![
             t.id,
             t.title,
@@ -269,6 +272,7 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
             t.recurrence,
             t.recurrence_source_id,
             t.recurrence_occurrence,
+            t.checkin_weekdays,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -318,7 +322,7 @@ fn export_tasks(conn: &Connection, root: &Path) -> Result<(), String> {
         .prepare(
             "SELECT id, title, notes, status, priority, sort_order, parent_id, category_id,
              estimate_pomodoros, due_at, start_at, completed_at, created_at, updated_at,
-             recurrence, recurrence_source_id, recurrence_occurrence FROM tasks",
+             recurrence, recurrence_source_id, recurrence_occurrence, checkin_weekdays FROM tasks",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -341,6 +345,7 @@ fn export_tasks(conn: &Connection, root: &Path) -> Result<(), String> {
                 recurrence: row.get(14)?,
                 recurrence_source_id: row.get(15)?,
                 recurrence_occurrence: row.get(16)?,
+                checkin_weekdays: row.get(17)?,
             })
         })
         .map_err(|e| e.to_string())?;
