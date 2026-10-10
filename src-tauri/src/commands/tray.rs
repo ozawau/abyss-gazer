@@ -1,4 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -10,8 +11,8 @@ use tauri::{
 pub const TRAY_ID: &str = "pomodoro-timer";
 pub const TRAY_CALENDAR_LABEL: &str = "tray-calendar";
 
-const POPOVER_WIDTH: f64 = 300.0;
-const POPOVER_HEIGHT: f64 = 344.0;
+const POPOVER_WIDTH: f64 = 312.0;
+const POPOVER_HEIGHT: f64 = 468.0;
 /// Ignore the blur that showing the popover itself can cause.
 const SHOW_BLUR_GUARD_MS: u64 = 350;
 /// A click that already dismissed the popover must not open it again.
@@ -19,6 +20,7 @@ const RECENT_CLOSE_MS: u64 = 180;
 
 static BLUR_IGNORED_UNTIL: AtomicU64 = AtomicU64::new(0);
 static CLOSED_AT: AtomicU64 = AtomicU64::new(0);
+static FOCUS_TASK_TITLE: Mutex<String> = Mutex::new(String::new());
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -93,7 +95,12 @@ fn position_calendar(window: &WebviewWindow, icon: &Rect) {
             top + area.size.height as f64,
         )
     } else {
-        (f64::MIN / 4.0, f64::MIN / 4.0, f64::MAX / 4.0, f64::MAX / 4.0)
+        (
+            f64::MIN / 4.0,
+            f64::MIN / 4.0,
+            f64::MAX / 4.0,
+            f64::MAX / 4.0,
+        )
     };
 
     let mut y = if below + pop_h <= work_b {
@@ -114,6 +121,8 @@ fn show_calendar(app: &AppHandle, icon: &Rect) {
     };
     position_calendar(&window, icon);
     guard_show_blur();
+    #[cfg(target_os = "macos")]
+    install_outside_click_monitor(app);
     let _ = window.show();
     let _ = window.emit("tray-calendar-shown", ());
     present_calendar(&window);
@@ -174,24 +183,21 @@ fn ensure_calendar_window(app: &AppHandle) -> Option<WebviewWindow> {
 }
 
 fn create_calendar_window(app: &AppHandle) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
-    let window = tauri::webview::WebviewWindowBuilder::new(
-        app,
-        TRAY_CALENDAR_LABEL,
-        WebviewUrl::default(),
-    )
-    .title("日历")
-    .inner_size(POPOVER_WIDTH, POPOVER_HEIGHT)
-    .resizable(false)
-    .decorations(false)
-    .transparent(true)
-    .shadow(true)
-    .always_on_top(true)
-    .visible_on_all_workspaces(true)
-    .skip_taskbar(true)
-    .visible(false)
-    .focused(false)
-    .accept_first_mouse(true)
-    .build()?;
+    let window =
+        tauri::webview::WebviewWindowBuilder::new(app, TRAY_CALENDAR_LABEL, WebviewUrl::default())
+            .title("日历")
+            .inner_size(POPOVER_WIDTH, POPOVER_HEIGHT)
+            .resizable(false)
+            .decorations(false)
+            .transparent(true)
+            .shadow(true)
+            .always_on_top(true)
+            .visible_on_all_workspaces(true)
+            .skip_taskbar(true)
+            .visible(false)
+            .focused(false)
+            .accept_first_mouse(true)
+            .build()?;
 
     let handle = app.clone();
     window.on_window_event(move |event| match event {
@@ -239,8 +245,18 @@ pub fn set_pomodoro_tray(
     timer_paused: Option<bool>,
     timer_clock: Option<String>,
     timer_focus_phase: Option<bool>,
+    focus_task_title: Option<String>,
 ) -> Result<(), String> {
-    let _ = (timer_active, timer_paused, timer_clock, timer_focus_phase);
+    let _ = (timer_paused, timer_clock, timer_focus_phase);
+    let active = timer_active.unwrap_or(false);
+    store_focus_task(
+        &app,
+        if active {
+            focus_task_title.filter(|title| !title.trim().is_empty())
+        } else {
+            None
+        },
+    );
     apply_tray(&app, &title, &tooltip)?;
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_title(&window_title);
@@ -256,6 +272,41 @@ pub fn set_pomodoro_tray(
     Ok(())
 }
 
+fn store_focus_task(app: &AppHandle, title: Option<String>) {
+    let next = title.unwrap_or_default();
+    let mut current = FOCUS_TASK_TITLE
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    if *current == next {
+        return;
+    }
+    *current = next.clone();
+    drop(current);
+    let _ = app.emit("tray-focus-task", next);
+}
+
+#[tauri::command]
+pub fn tray_focus_task() -> String {
+    FOCUS_TASK_TITLE
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .clone()
+}
+
+#[tauri::command]
+pub fn open_main_from_tray(app: AppHandle) -> Result<(), String> {
+    hide_calendar(&app);
+    mark_closed();
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    #[cfg(target_os = "macos")]
+    activate_app();
+    Ok(())
+}
+
 fn prevent_app_window_order() {
     #[cfg(target_os = "macos")]
     {
@@ -267,6 +318,16 @@ fn prevent_app_window_order() {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn activate_app() {
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+}
+
 fn present_calendar(window: &WebviewWindow) {
     #[cfg(target_os = "macos")]
     {
@@ -276,6 +337,70 @@ fn present_calendar(window: &WebviewWindow) {
     {
         let _ = window.set_focus();
     }
+}
+
+#[cfg(target_os = "macos")]
+fn install_outside_click_monitor(app: &AppHandle) {
+    static INSTALLED: AtomicBool = AtomicBool::new(false);
+    if INSTALLED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+
+    use std::ptr::NonNull;
+
+    use block2::RcBlock;
+    use objc2_app_kit::{NSEvent, NSEventMask};
+
+    let mask =
+        NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown | NSEventMask::OtherMouseDown;
+    let global_app = app.clone();
+    let global_block = RcBlock::new(move |_event: NonNull<NSEvent>| {
+        dismiss_calendar_if_click_outside(&global_app);
+    });
+    let local_app = app.clone();
+    let local_block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        dismiss_calendar_if_click_outside(&local_app);
+        event.as_ptr()
+    });
+    let global = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &*global_block);
+    // The returned event stays in the queue so the click still reaches its window.
+    let local =
+        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &*local_block) };
+    // Monitors copy these blocks and run them for the rest of the process.
+    // Dropping them from inside a click handler would free the running block.
+    std::mem::forget(global_block);
+    std::mem::forget(local_block);
+    std::mem::forget(global);
+    std::mem::forget(local);
+}
+
+#[cfg(target_os = "macos")]
+fn dismiss_calendar_if_click_outside(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(TRAY_CALENDAR_LABEL) else {
+        return;
+    };
+    if !window.is_visible().unwrap_or(false) || show_blur_guarded() {
+        return;
+    }
+    if click_inside_calendar(&window) {
+        return;
+    }
+    hide_calendar(app);
+    mark_closed();
+}
+
+#[cfg(target_os = "macos")]
+fn click_inside_calendar(window: &WebviewWindow) -> bool {
+    let point = objc2_app_kit::NSEvent::mouseLocation();
+    let mut inside = false;
+    with_ns_window(window, |ns_window| {
+        let frame = ns_window.frame();
+        inside = point.x >= frame.origin.x
+            && point.y >= frame.origin.y
+            && point.x < frame.origin.x + frame.size.width
+            && point.y < frame.origin.y + frame.size.height;
+    });
+    inside
 }
 
 #[cfg(target_os = "macos")]

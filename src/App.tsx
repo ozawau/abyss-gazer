@@ -360,17 +360,22 @@ function MainApp() {
     setPomodoroTiming(tick.status !== "idle");
   }, []);
 
+  const focusingTitle =
+    pomodoroTiming && pomodoroTask
+      ? formatTaskLineage(pomodoroTask, tasksById)
+      : null;
+
   useEffect(() => {
-    void syncPomodoroPresence(pomodoroTick, locale, pomodoroSettings);
-  }, [pomodoroTick, locale, pomodoroSettings]);
+    void syncPomodoroPresence(pomodoroTick, locale, pomodoroSettings, focusingTitle);
+  }, [pomodoroTick, locale, pomodoroSettings, focusingTitle]);
 
   useEffect(() => {
     const flushPresence = () => {
-      void syncPomodoroPresence(pomodoroTickRef.current, locale, pomodoroSettings);
+      void syncPomodoroPresence(pomodoroTickRef.current, locale, pomodoroSettings, focusingTitle);
     };
     window.addEventListener("abyss-background", flushPresence);
     return () => window.removeEventListener("abyss-background", flushPresence);
-  }, [locale, pomodoroSettings]);
+  }, [locale, pomodoroSettings, focusingTitle]);
 
   useEffect(() => {
     return () => {

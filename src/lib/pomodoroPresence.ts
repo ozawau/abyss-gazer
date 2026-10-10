@@ -49,6 +49,7 @@ export async function syncPomodoroPresence(
   tick: PomodoroTick | null,
   locale: AppLocale = "zh",
   settings?: PomodoroSettings | null,
+  focusTaskTitle?: string | null,
 ): Promise<void> {
   const resolved = resolveTick(tick);
   const title = presenceTitle(resolved);
@@ -98,6 +99,7 @@ export async function syncPomodoroPresence(
       auto_focus_after_break: autoFocusAfterBreak,
       focusSecondsAfterBreak,
       focus_seconds_after_break: focusSecondsAfterBreak,
+      focusTaskTitle: timerActive ? focusTaskTitle?.trim() || null : null,
     });
   } catch (err) {
     console.error("pomodoro tray update failed", err);

@@ -2052,6 +2052,7 @@ body.is-task-dragging * {
 
 .completed-filter-field input,
 .completed-filter-field select,
+.completed-parent-trigger,
 .completed-filter-clear {
   box-sizing: border-box;
   height: 2.05rem;
@@ -2117,6 +2118,108 @@ body.is-task-dragging * {
   background: var(--bg-hover);
 }
 
+.completed-parent-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 10rem;
+  max-width: 16rem;
+  cursor: pointer;
+  text-align: left;
+  font-weight: 400;
+}
+
+.completed-parent-trigger span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.completed-parent-trigger.is-empty span {
+  color: var(--text-muted);
+}
+
+.completed-parent-caret {
+  flex: none;
+  color: #5a6b82;
+  font-size: 0.65rem;
+}
+
+.completed-parent-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.35rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(21, 32, 51, 0.14);
+  overflow: hidden;
+}
+
+.completed-parent-search {
+  width: 100%;
+  box-sizing: border-box;
+  height: 2rem;
+  padding: 0 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.completed-parent-options {
+  overflow: auto;
+  max-height: 14rem;
+}
+
+.completed-parent-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #152033;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.completed-parent-option > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.completed-parent-option small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 400;
+}
+
+.completed-parent-option:hover,
+.completed-parent-option.is-active {
+  background: #e8eef6;
+}
+
+.completed-parent-option.is-active {
+  font-weight: 600;
+}
+
+.completed-parent-empty {
+  margin: 0.35rem 0.45rem 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
 .completed-list-meta {
   margin-bottom: 0.45rem;
   color: var(--text-muted);
@@ -2167,6 +2270,26 @@ body.is-task-dragging * {
 .completed-lineage {
   font-weight: 400;
   color: var(--text-muted);
+}
+
+button.completed-lineage-link {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 400;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: transparent;
+}
+
+button.completed-lineage-link:hover {
+  color: var(--text);
+  text-decoration-color: currentColor;
 }
 
 .completed-row-meta {
@@ -2468,6 +2591,7 @@ html.is-android .task-hover-card.is-pinned {
 }
 
 .focus-count {
+  display: block;
   margin-top: 0.35rem;
   color: var(--text-muted);
   font-size: clamp(0.75rem, 1.5vw, 0.9rem);

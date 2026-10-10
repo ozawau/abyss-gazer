@@ -85,6 +85,8 @@ pub fn run() {
             commands::holidays::read_cn_holidays_cache,
             commands::holidays::write_cn_holidays_cache,
             commands::tray::set_pomodoro_tray,
+            commands::tray::tray_focus_task,
+            commands::tray::open_main_from_tray,
             get_db_path,
             reopen_database,
             widget::request_pin_checkin_widget,

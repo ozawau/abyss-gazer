@@ -1,6 +1,6 @@
 [package]
 name = "abyss-gazer"
-version = "1.20.0"
+version = "1.21.0"
 description = "Abyss Gazer — task management and focus tools"
 authors = ["you"]
 edition = "2021"
@@ -33,10 +33,13 @@ winreg = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+block2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSApplication",
+    "NSEvent",
     "NSResponder",
     "NSWindow",
+    "block2",
 ] }
 
 [profile.release]

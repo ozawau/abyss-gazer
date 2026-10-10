@@ -125,6 +125,8 @@ html.tray-calendar-root #root {
   place-items: center;
   min-width: 0;
   min-height: 0;
+  padding: 4px 3px;
+  box-sizing: border-box;
 }
 
 .tray-cal-mark {
@@ -132,10 +134,19 @@ html.tray-calendar-root #root {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 34px;
+  max-width: 100%;
+  padding: 2px 4px 3px;
+  box-sizing: border-box;
   border-radius: 7px;
   border: 1.5px solid transparent;
+}
+
+.tray-cal-numline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  max-width: 100%;
 }
 
 .tray-cal-mark.is-today {
@@ -154,6 +165,57 @@ html.tray-calendar-root #root {
   font-weight: 500;
 }
 
+.tray-cal-day.is-holiday .tray-cal-num,
+.tray-cal-day.is-weekend .tray-cal-num {
+  color: #ff6961;
+}
+
+.tray-cal-day.is-outside.is-holiday .tray-cal-num,
+.tray-cal-day.is-outside.is-weekend .tray-cal-num {
+  color: rgba(255, 105, 97, 0.5);
+}
+
+.tray-cal-badge {
+  flex: 0 0 auto;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 1px;
+  border-radius: 3px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+}
+
+.tray-cal-badge.is-holiday {
+  background: rgba(255, 69, 58, 0.22);
+  color: #ff6961;
+}
+
+.tray-cal-badge.is-adjusted-workday {
+  background: rgba(10, 132, 255, 0.24);
+  color: #64b5ff;
+}
+
+.tray-cal-day.is-outside .tray-cal-badge {
+  opacity: 0.55;
+}
+
+.tray-cal-lunar {
+  max-width: 100%;
+  margin-top: 1px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 8px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-cal-day.is-outside .tray-cal-lunar {
+  color: rgba(255, 255, 255, 0.22);
+}
+
 .tray-cal-dot {
   width: 4px;
   height: 4px;
@@ -164,4 +226,57 @@ html.tray-calendar-root #root {
 
 .tray-cal-dot.is-on {
   background: #d45dff;
+}
+
+.tray-cal-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tray-cal-focus {
+  min-width: 0;
+}
+
+.tray-cal-focus-label {
+  display: block;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tray-cal-focus-title {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tray-cal-focus-title.is-empty {
+  color: rgba(255, 255, 255, 0.38);
+  font-weight: 500;
+}
+
+.tray-cal-open {
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: #0a84ff;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.tray-cal-open:hover {
+  background: #409cff;
 }

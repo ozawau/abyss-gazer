@@ -97,6 +97,7 @@ export function PomodoroView({
     () => plannedFor("focus", DEFAULT_POMODORO_SETTINGS),
   );
   const [todayCount, setTodayCount] = useState(0);
+  const [todayTotal, setTodayTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [togglingDone, setTogglingDone] = useState(false);
 
@@ -198,12 +199,19 @@ export function PomodoroView({
   useEffect(() => {
     if (!selectedTask) {
       setTodayCount(0);
+      setTodayTotal(0);
       return;
     }
     let cancelled = false;
-    countFocusSessionsSince(selectedTask.id, startOfLocalDayMs())
-      .then((n) => {
-        if (!cancelled) setTodayCount(n);
+    const since = startOfLocalDayMs();
+    Promise.all([
+      countFocusSessionsSince(selectedTask.id, since),
+      countFocusSessionsTotalSince(since),
+    ])
+      .then(([taskCount, total]) => {
+        if (cancelled) return;
+        setTodayCount(taskCount);
+        setTodayTotal(total);
       })
       .catch((err) => {
         if (!cancelled) setError(String(err));
@@ -212,6 +220,18 @@ export function PomodoroView({
       cancelled = true;
     };
   }, [selectedTask?.id, dataEpoch, todayKey]);
+
+  async function refreshTodayFocus() {
+    const selectedId = selectedTaskRef.current?.id ?? null;
+    const since = startOfLocalDayMs();
+    const [taskCount, total] = await Promise.all([
+      selectedId ? countFocusSessionsSince(selectedId, since) : Promise.resolve(0),
+      countFocusSessionsTotalSince(since),
+    ]);
+    if ((selectedTaskRef.current?.id ?? null) !== selectedId) return;
+    setTodayCount(taskCount);
+    setTodayTotal(total);
+  }
 
   async function persistSession(completed: boolean, taskId?: string | null) {
     const id = taskId ?? sessionTaskIdRef.current ?? selectedTaskRef.current?.id;
@@ -236,8 +256,7 @@ export function PomodoroView({
       });
       onSessionsChanged?.();
       if (completed && kind === "focus") {
-        const n = await countFocusSessionsSince(id, startOfLocalDayMs());
-        if (selectedTaskRef.current?.id === id) setTodayCount(n);
+        await refreshTodayFocus();
       }
     } catch (err) {
       const message = String(err);
@@ -276,8 +295,7 @@ export function PomodoroView({
         credit: sliceTenths / 10,
       });
       onSessionsChanged?.();
-      const n = await countFocusSessionsSince(taskId, startOfLocalDayMs());
-      if (selectedTaskRef.current?.id === taskId) setTodayCount(n);
+      await refreshTodayFocus();
     } catch (err) {
       creditedTenthsRef.current -= sliceTenths;
       const message = String(err);
@@ -705,7 +723,10 @@ export function PomodoroView({
             </div>
             {selectedTask ? (
               <span className="focus-count">
-                {t("pomodoro.todayCount", { count: formatPomodoroAmount(todayCount) })}
+                {t("pomodoro.todayCount", {
+                  count: formatPomodoroAmount(todayCount),
+                  total: formatPomodoroAmount(todayTotal),
+                })}
               </span>
             ) : (
               <span className="focus-count">{t("pomodoro.taskDeletedPaused")}</span>

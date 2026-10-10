@@ -19,6 +19,7 @@ pub fn set_pomodoro_tray(
     break_seconds_after_focus: Option<i64>,
     auto_focus_after_break: Option<bool>,
     focus_seconds_after_break: Option<i64>,
+    focus_task_title: Option<String>,
 ) -> Result<(), String> {
     let _ = (badge, tooltip);
     if let Some(win) = app.get_webview_window("main") {
@@ -65,6 +66,22 @@ pub fn set_pomodoro_tray(
             auto_focus_after_break,
             focus_seconds_after_break,
         );
+    }
+    let _ = focus_task_title;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn tray_focus_task() -> String {
+    String::new()
+}
+
+#[tauri::command]
+pub fn open_main_from_tray(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
     }
     Ok(())
 }

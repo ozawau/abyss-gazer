@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getSystemSettings, listPomodoroSessionsInRange, listTasks } from "../lib/api";
+import { initCnHolidayData, useCnHolidayRevision } from "../lib/cnHolidayData";
+import { statutoryDayInfo, statutoryDayTitle } from "../lib/cnStatutoryDay";
+import { formatLunarDate, formatLunarDayShort } from "../lib/dateDisplay";
 import {
   addMonths,
   buildMonthGrid,
@@ -37,7 +41,13 @@ export function TrayCalendar() {
   const [weekStartsOn, setWeekStartsOn] = useState<WeekStartsOn>(DEFAULT_WEEK_STARTS_ON);
   const [markedDays, setMarkedDays] = useState<ReadonlySet<string>>(() => new Set());
   const [reloadToken, setReloadToken] = useState(0);
+  const [focusTitle, setFocusTitle] = useState<string | null>(null);
   const today = useLocalToday();
+  useCnHolidayRevision();
+
+  useEffect(() => {
+    initCnHolidayData();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -117,6 +127,30 @@ export function TrayCalendar() {
 
   useEffect(() => loadMarks(cursor, weekStartsOn), [cursor, weekStartsOn, loadMarks]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const apply = (title: string) => {
+      if (!cancelled) setFocusTitle(title.trim() || null);
+    };
+    void invoke<string>("tray_focus_task").then(apply).catch(() => apply(""));
+    let unlisten: (() => void) | undefined;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) => listen<string>("tray-focus-task", (event) => apply(event.payload ?? "")))
+      .then((stop) => {
+        if (cancelled) stop();
+        else unlisten = stop;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [reloadToken]);
+
+  function openApp() {
+    void invoke("open_main_from_tray").catch(() => {});
+  }
+
   const cells = useMemo(
     () => buildMonthGrid(cursor, weekStartsOn),
     [cursor, weekStartsOn],
@@ -156,26 +190,68 @@ export function TrayCalendar() {
         ))}
       </div>
       <div className="tray-cal-grid">
-        <svg className="tray-cal-outline" viewBox={`0 0 ${COLS} ${ROWS}`} aria-hidden>
+        <svg
+          className="tray-cal-outline"
+          viewBox={`0 0 ${COLS} ${ROWS}`}
+          preserveAspectRatio="none"
+          aria-hidden
+        >
           <path d={outline} />
         </svg>
         {cells.map((day) => {
           const inMonth = day.getMonth() === month;
           const marked = markedDays.has(dayKey(day));
           const isToday = sameDay(day, today);
+          const statutory = statutoryDayInfo(day);
+          const lunar = formatLunarDayShort(day, locale);
+          const weekend = day.getDay() === 0 || day.getDay() === 6;
+          const title = [
+            statutory ? statutoryDayTitle(statutory, locale) : "",
+            lunar ? formatLunarDate(day, locale) : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
           return (
             <div
               key={dayKey(day)}
-              className={`tray-cal-day${inMonth ? "" : " is-outside"}`}
+              className={`tray-cal-day${inMonth ? "" : " is-outside"}${
+                statutory?.mark === "holiday"
+                  ? " is-holiday"
+                  : statutory?.mark === "adjusted-workday"
+                    ? " is-workday"
+                    : weekend
+                      ? " is-weekend"
+                      : ""
+              }`}
+              title={title || undefined}
             >
               <div className={`tray-cal-mark${isToday ? " is-today" : ""}`}>
-                <span className="tray-cal-num">{day.getDate()}</span>
+                <span className="tray-cal-numline">
+                  <span className="tray-cal-num">{day.getDate()}</span>
+                  {statutory && (
+                    <span className={`tray-cal-badge is-${statutory.mark}`}>
+                      {statutory.mark === "holiday" ? t("calendar.rest") : t("calendar.work")}
+                    </span>
+                  )}
+                </span>
+                <span className="tray-cal-lunar">{lunar}</span>
                 <span className={`tray-cal-dot${marked ? " is-on" : ""}`} />
               </div>
             </div>
           );
         })}
       </div>
+      <footer className="tray-cal-foot">
+        <div className="tray-cal-focus">
+          <span className="tray-cal-focus-label">{t("tray.focus")}</span>
+          <strong className={`tray-cal-focus-title${focusTitle ? "" : " is-empty"}`}>
+            {focusTitle ?? t("tray.noFocus")}
+          </strong>
+        </div>
+        <button type="button" className="tray-cal-open" onClick={openApp}>
+          {t("tray.openApp")}
+        </button>
+      </footer>
     </section>
   );
 }
@@ -223,7 +299,7 @@ function monthOutlinePath(inMonth: boolean[]): string {
   } while (seg !== segs[0]);
 
   const corners = simplifyOutline(points);
-  const inset = 0.08;
+  const inset = 0;
   const offset = corners.map((point, index) => {
     const prev = corners[(index - 1 + corners.length) % corners.length]!;
     const nextPoint = corners[(index + 1) % corners.length]!;
