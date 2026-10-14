@@ -79,7 +79,6 @@ pub fn tray_focus_task() -> String {
 #[tauri::command]
 pub fn open_main_from_tray(app: AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();
     }
