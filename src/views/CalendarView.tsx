@@ -281,10 +281,16 @@ export function CalendarView({
     [tasks],
   );
 
-  const visibleTaskIds = useMemo(
-    () => new Set(filteredTasks.map((task) => task.id)),
-    [filteredTasks],
-  );
+  // Scheduled rows stay on leaf tasks. Focus blocks still include parent tasks
+  // that were timed directly, otherwise those pomodoros disappear.
+  const sessionTaskIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of categoryTasks) {
+      if (hideDone && task.status === "done") continue;
+      ids.add(task.id);
+    }
+    return ids;
+  }, [categoryTasks, hideDone]);
 
   const scheduledTasks = useMemo(
     () =>
@@ -295,8 +301,8 @@ export function CalendarView({
   );
 
   const visibleSessions = useMemo(
-    () => sessions.filter((session) => visibleTaskIds.has(session.task_id)),
-    [sessions, visibleTaskIds],
+    () => sessions.filter((session) => sessionTaskIds.has(session.task_id)),
+    [sessions, sessionTaskIds],
   );
 
   const selectedDayPlans = useMemo(

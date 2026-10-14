@@ -9,7 +9,7 @@ import {
   SystemSettings,
   Task,
 } from "../lib/api";
-import { addDays, dayKey, startOfLocalDay } from "../lib/calendar";
+import { addDays, completedFocusCountOnDay, dayKey, startOfLocalDay } from "../lib/calendar";
 import { habitScheduledOn } from "../lib/checkinSchedule";
 import { descendantIds } from "../lib/taskTree";
 
@@ -216,9 +216,7 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
         focusMinutes: visibleSessions
           .filter((session) => dayKey(new Date(session.started_at)) === key && session.kind === "focus" && session.completed)
           .reduce((sum, session) => sum + (session.planned_seconds * (session.credit ?? 1)) / 60, 0),
-        focusPomodoros: visibleSessions
-          .filter((session) => dayKey(new Date(session.started_at)) === key && session.kind === "focus" && session.completed)
-          .reduce((sum, session) => sum + (session.credit ?? 1), 0),
+        focusPomodoros: completedFocusCountOnDay(visibleSessions, cursor),
       });
     }
     return points;
@@ -242,7 +240,10 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
         if (checkins.has(`${task.id}|${dayKey(cursor)}`) || autoCheckins.has(`${task.id}|${dayKey(cursor)}`)) checked += 1;
       }
     }
-    return { created, completed, open, focusMinutes, focusPomodoros: visibleSessions.filter((session) => session.kind === "focus" && session.completed).reduce((sum, session) => sum + (session.credit ?? 1), 0), completionRate: created ? completed / created : 0, checked, applicable, checkinRate: applicable ? checked / applicable : 0 };
+    const focusPomodoros = visibleSessions.filter(
+      (session) => session.started_at >= startMs && session.started_at < endMs,
+    ).length;
+    return { created, completed, open, focusMinutes, focusPomodoros, completionRate: created ? completed / created : 0, checked, applicable, checkinRate: applicable ? checked / applicable : 0 };
   }, [autoCheckins, checkins, end, endMs, startMs, systemSettings.checkinCategoryId, today, visibleSessions, visibleTasks]);
 
   const categoryStats = useMemo(() => {
@@ -344,11 +345,11 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
             {focusLinePoints.map((point) => <span className="statistics-line-point" key={point.key} style={{ left: `${point.x}%`, top: `${point.y}%` }} />)}
           </div>
           <div className="statistics-line-hit-layer">
-            {days.map((point) => <span className="statistics-line-hit" key={point.key} role="img" tabIndex={0} aria-label={`${point.label} ${t("statistics.focusMinutes")}: ${Math.round(point.focusMinutes)}`} onPointerEnter={() => showBarTooltip({ chart: "focus", key: point.key, label: point.label, title: t("statistics.focusMinutes"), value: `${Math.round(point.focusMinutes)} ${t("statistics.minutes")}`, secondary: `${t("statistics.focusPomodoros")}: ${point.focusPomodoros.toFixed(1)}` })} onPointerLeave={hideBarTooltip} onFocus={() => setBarTooltip({ chart: "focus", key: point.key, label: point.label, title: t("statistics.focusMinutes"), value: `${Math.round(point.focusMinutes)} ${t("statistics.minutes")}`, secondary: `${t("statistics.focusPomodoros")}: ${point.focusPomodoros.toFixed(1)}` })} onBlur={hideBarTooltip} />)}
+            {days.map((point) => <span className="statistics-line-hit" key={point.key} role="img" tabIndex={0} aria-label={`${point.label} ${t("statistics.focusMinutes")}: ${Math.round(point.focusMinutes)}`} onPointerEnter={() => showBarTooltip({ chart: "focus", key: point.key, label: point.label, title: t("statistics.focusMinutes"), value: `${Math.round(point.focusMinutes)} ${t("statistics.minutes")}`, secondary: `${t("statistics.focusPomodoros")}: ${point.focusPomodoros}` })} onPointerLeave={hideBarTooltip} onFocus={() => setBarTooltip({ chart: "focus", key: point.key, label: point.label, title: t("statistics.focusMinutes"), value: `${Math.round(point.focusMinutes)} ${t("statistics.minutes")}`, secondary: `${t("statistics.focusPomodoros")}: ${point.focusPomodoros}` })} onBlur={hideBarTooltip} />)}
           </div>
           <div className="statistics-line-labels" aria-hidden="true">{days.map((point, index) => <small key={point.key} style={{ visibility: focusAxis.visible.has(index) ? "visible" : "hidden" }}>{point.label}</small>)}</div>
           {barTooltip?.chart === "focus" && <div className="statistics-chart-tooltip" role="status"><strong>{barTooltip.label}</strong><span>{barTooltip.title}: {barTooltip.value}</span><span>{barTooltip.secondary}</span></div>}
-        </div><p className="statistics-chart-note">{t("statistics.focusSummary", { minutes: Math.round(summary.focusMinutes), pomodoros: summary.focusPomodoros.toFixed(1) })}</p></section>
+        </div><p className="statistics-chart-note">{t("statistics.focusSummary", { minutes: Math.round(summary.focusMinutes), pomodoros: summary.focusPomodoros })}</p></section>
         <section className="statistics-panel"><h2>{t("statistics.categoryBreakdown")}</h2>{categoryStats.length === 0 ? <ChartEmpty label={t("statistics.noData")} /> : <div className="statistics-category-list">{categoryStats.map((row) => { const total = row.done + row.open; return <div className="statistics-category-row" key={row.name}><div className="statistics-row-label"><span>{row.name}</span><small>{total}</small></div><div className="statistics-stack"><i className="stack-done" style={{ width: `${(row.done / total) * 100}%` }} /><i className="stack-open" style={{ width: `${(row.open / total) * 100}%` }} /></div><small>{row.done}/{total}</small></div>; })}</div>}<div className="statistics-legend"><span><i className="legend-completed" />{t("statistics.completed")}</span><span><i className="legend-open" />{t("statistics.open")}</span></div></section>
         <section className="statistics-panel"><h2>{t("statistics.checkinBreakdown")}</h2>{habitStats.length === 0 ? <ChartEmpty label={t("statistics.noData")} /> : <div className="statistics-habit-list">{habitStats.map((habit) => <div className="statistics-habit-row" key={habit.id}><div className="statistics-row-label"><span>{habit.title}</span><small>{habit.checked}/{habit.applicable}</small></div><div className="statistics-progress"><i style={{ width: `${habit.rate * 100}%` }} /></div><strong>{Math.round(habit.rate * 100)}%</strong></div>)}</div>}</section>
       </div>

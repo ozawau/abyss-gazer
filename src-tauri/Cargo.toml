@@ -1,6 +1,6 @@
 [package]
 name = "abyss-gazer"
-version = "1.21.0"
+version = "1.22.0"
 description = "Abyss Gazer — task management and focus tools"
 authors = ["you"]
 edition = "2021"

@@ -211,10 +211,39 @@ fn local_task_updated_at(conn: &Connection, id: &str) -> Result<Option<i64>, Str
     .map_err(|e| e.to_string())
 }
 
+fn tombstone_updated_at(conn: &Connection, kind: &str, entity_id: &str) -> Result<Option<i64>, String> {
+    conn.query_row(
+        "SELECT updated_at FROM sync_tombstones WHERE kind = ?1 AND entity_id = ?2",
+        rusqlite::params![kind, entity_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// A live row newer than a delete wins. Drop that stale tombstone so the next
+/// export does not publish the delete again.
+fn drop_stale_tombstone(
+    conn: &Connection,
+    kind: &str,
+    entity_id: &str,
+    live_updated_at: i64,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM sync_tombstones WHERE kind = ?1 AND entity_id = ?2 AND updated_at <= ?3",
+        rusqlite::params![kind, entity_id, live_updated_at],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn apply_task_delete(conn: &Connection, id: &str, updated_at: i64) -> Result<(), String> {
     let local = local_task_updated_at(conn, id)?;
-    if local.is_some_and(|ts| ts > updated_at) {
-        return Ok(());
+    if let Some(ts) = local {
+        if ts > updated_at {
+            drop_stale_tombstone(conn, "task", id, ts)?;
+            return Ok(());
+        }
     }
     conn.execute("DELETE FROM tasks WHERE id = ?1", [id])
         .map_err(|e| e.to_string())?;
@@ -237,9 +266,14 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
     }
     let t = env.data.as_ref().unwrap();
     let remote_ts = env.updated_at.max(t.updated_at);
-    let local = local_task_updated_at(conn, &t.id)?;
-    if local.is_some_and(|ts| ts >= remote_ts) {
+    if tombstone_updated_at(conn, "task", &t.id)?.is_some_and(|ts| ts > remote_ts) {
         return Ok(());
+    }
+    if let Some(ts) = local_task_updated_at(conn, &t.id)? {
+        if ts >= remote_ts {
+            drop_stale_tombstone(conn, "task", &t.id, ts)?;
+            return Ok(());
+        }
     }
     conn.execute(
         "INSERT INTO tasks (id, title, notes, status, priority, sort_order, parent_id, category_id,
@@ -275,7 +309,8 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
             t.checkin_weekdays,
         ],
     )
-    .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
+    drop_stale_tombstone(conn, "task", &t.id, remote_ts)?;
     Ok(())
 }
 
@@ -736,6 +771,24 @@ fn export_tombstones(conn: &Connection, root: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     for row in rows {
         let (kind, entity_id, updated_at) = row.map_err(|e| e.to_string())?;
+        let live = match kind.as_str() {
+            "task" => local_task_updated_at(conn, &entity_id)?,
+            "category" => conn
+                .query_row(
+                    "SELECT updated_at FROM categories WHERE id = ?1",
+                    [&entity_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?,
+            _ => None,
+        };
+        if let Some(live_ts) = live {
+            if live_ts >= updated_at {
+                drop_stale_tombstone(conn, &kind, &entity_id, live_ts)?;
+                continue;
+            }
+        }
         match kind.as_str() {
             "task" => {
                 let env = SyncEnvelope::<SyncTask> {
@@ -855,6 +908,44 @@ mod tests {
             .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(title, "Hi");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn newer_task_drops_stale_delete() {
+        let dir = std::env::temp_dir().join(format!(
+            "abyss-sync-tomb-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = open_db(&dir.join("abyss.db")).expect("open");
+        conn.execute(
+            "INSERT INTO tasks (id, title, notes, status, priority, sort_order, created_at, updated_at, completed_at)
+             VALUES ('t-done', '审计', '', 'done', 'high', 0, 100, 300, 300)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO sync_tombstones (kind, entity_id, updated_at) VALUES ('task', 't-done', 200)",
+            [],
+        )
+        .unwrap();
+        export_logical(&conn, &dir).expect("export");
+        let raw = std::fs::read_to_string(dir.join("sync/tasks/t-done.json")).unwrap();
+        let env: SyncEnvelope<SyncTask> = serde_json::from_str(&raw).unwrap();
+        assert!(!env.deleted);
+        assert_eq!(env.data.unwrap().status, "done");
+        let left: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sync_tombstones WHERE entity_id = 't-done'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
