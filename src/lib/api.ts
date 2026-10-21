@@ -118,7 +118,7 @@ export function spawnRecurringTasks(
 
 export function reparentTask(input: {
   id: string;
-  parent_id: string;
+  parent_id: string | null;
 }): Promise<Task[]> {
   return afterLocalMutation(invoke("reparent_task", { input }));
 }

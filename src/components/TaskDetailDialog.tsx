@@ -137,6 +137,7 @@ export function TaskDetailDialog({
     setStartLocal(toDatetimeLocalValue(task.start_at));
     setDueLocal(toDatetimeLocalValue(task.due_at));
     const draft = recurrenceDraft(parseTaskRecurrence(task.recurrence));
+    setCountDirection("direction" in draft ? draft.direction : "forward");
     setIntervalDays(draft.kind === "interval" ? String(draft.days) : "1");
     if (draft.kind === "daily") {
       setPeriod("daily");
@@ -198,7 +199,7 @@ export function TaskDetailDialog({
       return { kind: "interval", days };
     }
     if (period === "weekly") return { kind: "weekly", weekdays };
-    if (period === "monthly" && monthMode === "day") return { kind: "monthly-day", days: monthDays };
+    if (period === "monthly" && monthMode === "day") return { kind: "monthly-day", direction: countDirection, days: monthDays };
     if (period === "monthly" && monthMode === "workday") {
       return { kind: "monthly-workday", direction: countDirection, indexes: ordinals };
     }
@@ -451,26 +452,28 @@ export function TaskDetailDialog({
                   onValuesChange={(values) => setLunarMonths(values.map(Number))}
                 />
               )}
+              {period === "monthly" && (
+                <OptionPicker
+                  value={countDirection}
+                  disabled={busy}
+                  ariaLabel={t("detail.countDirection")}
+                  options={[
+                    { value: "forward", label: t("detail.countForward") },
+                    { value: "backward", label: t("detail.countBackward") },
+                  ]}
+                  onChange={setCountDirection}
+                />
+              )}
               {period === "monthly" && monthMode === "day" && (
                 <OptionPicker
                   multiple
                   values={monthDays.map(String)}
                   disabled={busy}
                   ariaLabel={t("detail.repeatMonthlyDay")}
-                  options={dayOptions}
+                  options={countDirection === "backward"
+                    ? dayOptions.map((option) => ({ ...option, label: t("detail.monthDayFromEndN", { day: option.value }) }))
+                    : dayOptions}
                   onValuesChange={(values) => setMonthDays(values.map(Number))}
-                />
-              )}
-              {showOrdinal && (
-                <OptionPicker
-                  value={countDirection}
-                  disabled={busy}
-                  ariaLabel={t("detail.countForward")}
-                  options={[
-                    { value: "forward", label: t("detail.countForward") },
-                    { value: "backward", label: t("detail.countBackward") },
-                  ]}
-                  onChange={setCountDirection}
                 />
               )}
               {period === "yearly" && (

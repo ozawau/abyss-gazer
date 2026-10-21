@@ -10,6 +10,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.FileObserver
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteException
 import android.view.View
@@ -34,11 +38,17 @@ class CheckinWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onEnabled(context: Context) {
+        ensureWatching(context)
         scheduleMidnight(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        stopWatching()
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == ACTION_REFRESH) {
+            ensureWatching(context)
             updateAll(context)
             scheduleMidnight(context)
             return
@@ -46,12 +56,29 @@ class CheckinWidgetProvider : AppWidgetProvider() {
         if (intent.action == ACTION_TOGGLE) {
             val habitId = intent.getStringExtra(EXTRA_HABIT_ID)
             if (!habitId.isNullOrEmpty()) {
-                val message = CheckinBoard.toggleToday(context, habitId)
-                if (!message.isNullOrEmpty()) {
-                    Toast.makeText(context.applicationContext, message, Toast.LENGTH_SHORT).show()
+                // Launchers re-deliver collection clicks when the list rebinds
+                // under the finger. Ignore any toggle for a short window after
+                // the last one (all habits — not just the same id).
+                if (CheckinBoard.shouldIgnoreRapidToggle(habitId)) {
+                    return
                 }
-                updateAll(context)
-                MainActivity.notifyCheckinChanged()
+                val appCtx = context.applicationContext
+                // Block Rust snapshot publisher + FileObserver while the tap
+                // settles, otherwise a stale publish rewrites 2 done → 1 done.
+                CheckinBoard.markToggleQuiet(appCtx)
+                suppressWatcherRefreshUntil(
+                    SystemClock.elapsedRealtime() + CheckinBoard.TOGGLE_QUIET_MS,
+                )
+                val message = CheckinBoard.toggleToday(appCtx, habitId)
+                if (!message.isNullOrEmpty()) {
+                    Toast.makeText(appCtx, message, Toast.LENGTH_SHORT).show()
+                }
+                // Header only — rebinding the list mid-tap re-delivers the click.
+                updateCountsOnly(appCtx)
+                mainHandler.postDelayed({
+                    updateAll(appCtx)
+                    MainActivity.notifyCheckinChanged()
+                }, CheckinBoard.LIST_REFRESH_DELAY_MS)
             }
             return
         }
@@ -64,9 +91,90 @@ class CheckinWidgetProvider : AppWidgetProvider() {
         private const val ACTION_REFRESH = "com.abyssgazer.desktop.action.CHECKIN_WIDGET_REFRESH"
         private const val ACTION_TOGGLE = "com.abyssgazer.desktop.action.CHECKIN_WIDGET_TOGGLE"
 
+        private val watcherLock = Any()
+        private val mainHandler = Handler(Looper.getMainLooper())
+        private var snapshotWatcher: FileObserver? = null
+        private val refreshRunnable = Runnable {
+            if (SystemClock.elapsedRealtime() < suppressWatcherUntilElapsed) return@Runnable
+            val ctx = watcherContext ?: return@Runnable
+            updateAll(ctx)
+        }
+        @Volatile private var watcherContext: Context? = null
+        @Volatile private var suppressWatcherUntilElapsed: Long = 0L
+
+        private fun suppressWatcherRefreshUntil(elapsedRealtimeDeadline: Long) {
+            suppressWatcherUntilElapsed = elapsedRealtimeDeadline
+            mainHandler.removeCallbacks(refreshRunnable)
+        }
+
         @JvmStatic
         fun refresh(context: Context) {
-            updateAll(context)
+            val appCtx = context.applicationContext
+            ensureWatching(appCtx)
+            updateAll(appCtx)
+        }
+
+        /**
+         * Watch the snapshot file so in-app check-ins still redraw the card.
+         * Do not watch the SQLite files: journal traffic mid-toggle rebinds the
+         * list under the finger and undoes the tap on several OEMs.
+         */
+        @JvmStatic
+        fun ensureWatching(context: Context) {
+            val appCtx = context.applicationContext
+            synchronized(watcherLock) {
+                watcherContext = appCtx
+                if (snapshotWatcher == null) {
+                    snapshotWatcher = watchDirectory(
+                        appCtx.dataDir,
+                        setOf(
+                            "checkin-widget.json",
+                            "checkin-widget.json.tmp",
+                            "checkin-widget.tick",
+                        ),
+                    )
+                }
+            }
+        }
+
+        @JvmStatic
+        fun stopWatching() {
+            synchronized(watcherLock) {
+                snapshotWatcher?.stopWatching()
+                snapshotWatcher = null
+                watcherContext = null
+                mainHandler.removeCallbacks(refreshRunnable)
+            }
+        }
+
+        private fun watchDirectory(dir: File, names: Set<String>): FileObserver? {
+            if (!dir.isDirectory) return null
+            val mask = FileObserver.CLOSE_WRITE or FileObserver.MOVED_TO or
+                FileObserver.MODIFY or FileObserver.CREATE
+            @Suppress("DEPRECATION")
+            val observer = object : FileObserver(dir.absolutePath, mask) {
+                override fun onEvent(event: Int, path: String?) {
+                    if (path == null || path !in names) return
+                    if (SystemClock.elapsedRealtime() < suppressWatcherUntilElapsed) return
+                    mainHandler.removeCallbacks(refreshRunnable)
+                    mainHandler.postDelayed(refreshRunnable, 200)
+                }
+            }
+            return try {
+                observer.startWatching()
+                observer
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        /** Explicit broadcast so launchers that ignore silent AppWidget updates still redraw. */
+        @JvmStatic
+        fun requestRefreshBroadcast(context: Context) {
+            val appCtx = context.applicationContext
+            ensureWatching(appCtx)
+            val intent = Intent(ACTION_REFRESH).setClass(appCtx, CheckinWidgetProvider::class.java)
+            appCtx.sendBroadcast(intent)
         }
 
         /** Opens the system dialog to pin the check-in widget on the home screen. */
@@ -80,6 +188,7 @@ class CheckinWidgetProvider : AppWidgetProvider() {
         }
 
         private fun updateAll(context: Context) {
+            ensureWatching(context)
             val manager = AppWidgetManager.getInstance(context)
             val ids = manager.getAppWidgetIds(
                 ComponentName(context, CheckinWidgetProvider::class.java),
@@ -92,31 +201,49 @@ class CheckinWidgetProvider : AppWidgetProvider() {
             scheduleMidnight(context)
         }
 
+        /** Redraw summary / progress only — keeps the list stable under a tap. */
+        private fun updateCountsOnly(context: Context) {
+            val manager = AppWidgetManager.getInstance(context)
+            val ids = manager.getAppWidgetIds(
+                ComponentName(context, CheckinWidgetProvider::class.java),
+            )
+            if (ids.isEmpty()) return
+            val board = CheckinBoard.load(context)
+            for (id in ids) {
+                manager.partiallyUpdateAppWidget(id, countsRemoteViews(context, board))
+            }
+        }
+
+        private fun countsRemoteViews(context: Context, board: CheckinBoard): RemoteViews {
+            return RemoteViews(context.packageName, R.layout.checkin_widget).apply {
+                setTextViewText(R.id.widget_summary, board.summary)
+                setViewVisibility(
+                    R.id.widget_summary,
+                    if (board.summary.isEmpty()) View.GONE else View.VISIBLE,
+                )
+                setTextViewText(R.id.widget_nudge, board.nudge)
+                setViewVisibility(
+                    R.id.widget_nudge,
+                    if (board.nudge.isEmpty()) View.GONE else View.VISIBLE,
+                )
+                setViewVisibility(
+                    R.id.widget_progress,
+                    if (board.total == 0) View.GONE else View.VISIBLE,
+                )
+                setProgressBar(
+                    R.id.widget_progress,
+                    board.total.coerceAtLeast(1),
+                    board.done,
+                    false,
+                )
+            }
+        }
+
         private fun buildViews(context: Context, widgetId: Int): RemoteViews {
             val board = CheckinBoard.load(context)
-            val views = RemoteViews(context.packageName, R.layout.checkin_widget)
+            val views = countsRemoteViews(context, board)
             views.setTextViewText(R.id.widget_title, board.title)
             views.setTextViewText(R.id.widget_date, board.dateLabel)
-            views.setTextViewText(R.id.widget_summary, board.summary)
-            views.setViewVisibility(
-                R.id.widget_summary,
-                if (board.summary.isEmpty()) View.GONE else View.VISIBLE,
-            )
-            views.setTextViewText(R.id.widget_nudge, board.nudge)
-            views.setViewVisibility(
-                R.id.widget_nudge,
-                if (board.nudge.isEmpty()) View.GONE else View.VISIBLE,
-            )
-            views.setViewVisibility(
-                R.id.widget_progress,
-                if (board.total == 0) View.GONE else View.VISIBLE,
-            )
-            views.setProgressBar(
-                R.id.widget_progress,
-                board.total.coerceAtLeast(1),
-                board.done,
-                false,
-            )
             views.setTextViewText(R.id.widget_empty, board.emptyMessage)
             val service = Intent(context, CheckinWidgetService::class.java).apply {
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
@@ -267,12 +394,126 @@ internal data class CheckinBoard(
 ) {
     companion object {
         private val gate = Any()
+        /** Ignore every toggle (any habit) after one tap — list rebind can hit a neighbour. */
+        const val TOGGLE_QUIET_MS = 1200L
+        const val LIST_REFRESH_DELAY_MS = 700L
+        private var lastToggleAtElapsed: Long = 0L
+
+        /**
+         * True when any habit was toggled moments ago. Call before [toggleToday]
+         * so a duplicated / misplaced launcher click cannot undo the tap.
+         */
+        fun shouldIgnoreRapidToggle(@Suppress("UNUSED_PARAMETER") habitId: String): Boolean {
+            synchronized(gate) {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastToggleAtElapsed < TOGGLE_QUIET_MS) {
+                    return true
+                }
+                lastToggleAtElapsed = now
+                return false
+            }
+        }
+
+        /** Tell the Rust publisher to skip snapshot writes for [TOGGLE_QUIET_MS]. */
+        fun markToggleQuiet(context: Context) {
+            try {
+                File(context.dataDir, "checkin-widget.quiet")
+                    .writeText(System.currentTimeMillis().toString())
+            } catch (_: Exception) {
+                // Best-effort; debounce + deferred list refresh still apply.
+            }
+        }
 
         internal fun load(context: Context): CheckinBoard {
             synchronized(gate) {
                 val file = snapshotFile(context)
-                val parsed = readSnapshot(file)
+                val parsed = hydrateFromDatabase(context, readSnapshot(file))
                 return compose(parsed)
+            }
+        }
+
+        /**
+         * JSON can lag behind the SQLite database after in-app check-ins.
+         * Always merge live check-in days (and focus starts) before composing.
+         */
+        private fun hydrateFromDatabase(context: Context, snapshot: Snapshot?): Snapshot? {
+            if (snapshot == null || snapshot.habits.isEmpty()) return snapshot
+            val dbFile = databaseFile(context) ?: return snapshot
+            if (!dbFile.isFile) return snapshot
+            val db = openDatabase(context, writable = false) ?: return snapshot
+            return try {
+                // Reject empty / pre-migration leftovers so we never replace a
+                // good snapshot with a blank habit_checkins table.
+                val hasCheckinsTable = db.rawQuery(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'habit_checkins' LIMIT 1",
+                    null,
+                ).use { it.moveToFirst() }
+                if (!hasCheckinsTable) return snapshot
+
+                val parentOf = HashMap<String, String>()
+                db.rawQuery("SELECT id, parent_id FROM tasks", null).use { cursor ->
+                    val idIdx = cursor.getColumnIndex("id")
+                    val parentIdx = cursor.getColumnIndex("parent_id")
+                    while (cursor.moveToNext()) {
+                        if (idIdx < 0) continue
+                        val id = cursor.getString(idIdx) ?: continue
+                        val parent = if (parentIdx >= 0 && !cursor.isNull(parentIdx)) {
+                            cursor.getString(parentIdx)
+                        } else {
+                            null
+                        }
+                        if (!parent.isNullOrEmpty()) parentOf[id] = parent
+                    }
+                }
+                val habitIds = snapshot.habits.map { it.id }.toSet()
+                fun habitRoot(taskId: String): String? {
+                    var current = taskId
+                    val seen = HashSet<String>()
+                    while (true) {
+                        if (habitIds.contains(current)) return current
+                        val parent = parentOf[current] ?: return null
+                        if (!seen.add(current)) return null
+                        current = parent
+                    }
+                }
+                val manualByHabit = HashMap<String, MutableSet<String>>()
+                db.rawQuery("SELECT task_id, day FROM habit_checkins", null).use { cursor ->
+                    val taskIdx = cursor.getColumnIndex("task_id")
+                    val dayIdx = cursor.getColumnIndex("day")
+                    while (cursor.moveToNext()) {
+                        if (taskIdx < 0 || dayIdx < 0) continue
+                        val taskId = cursor.getString(taskIdx) ?: continue
+                        val day = cursor.getString(dayIdx) ?: continue
+                        if (!habitIds.contains(taskId)) continue
+                        manualByHabit.getOrPut(taskId) { linkedSetOf() }.add(day)
+                    }
+                }
+                val focusByHabit = HashMap<String, MutableList<Long>>()
+                db.rawQuery(
+                    "SELECT task_id, started_at FROM pomodoro_sessions WHERE kind = 'focus' AND completed = 1",
+                    null,
+                ).use { cursor ->
+                    val taskIdx = cursor.getColumnIndex("task_id")
+                    val startIdx = cursor.getColumnIndex("started_at")
+                    while (cursor.moveToNext()) {
+                        if (taskIdx < 0 || startIdx < 0 || cursor.isNull(startIdx)) continue
+                        val taskId = cursor.getString(taskIdx) ?: continue
+                        val habitId = habitRoot(taskId) ?: continue
+                        focusByHabit.getOrPut(habitId) { mutableListOf() }.add(cursor.getLong(startIdx))
+                    }
+                }
+                snapshot.copy(
+                    habits = snapshot.habits.map { habit ->
+                        habit.copy(
+                            manualDays = manualByHabit[habit.id] ?: emptySet(),
+                            focusStarts = focusByHabit[habit.id] ?: emptyList(),
+                        )
+                    },
+                )
+            } catch (_: Exception) {
+                snapshot
+            } finally {
+                db.close()
             }
         }
 
@@ -597,6 +838,14 @@ internal data class CheckinBoard(
                         false
                     } else {
                         insertCheckin(db, habitId, today)
+                        try {
+                            db.execSQL(
+                                "INSERT OR IGNORE INTO habit_checkin_items (habit_id, task_id, day) VALUES (?, ?, ?)",
+                                arrayOf(habitId, habitId, today),
+                            )
+                        } catch (_: SQLiteException) {
+                            // Older databases have no item table.
+                        }
                         if (manualIndex == null) manual.put(today)
                         true
                     }
@@ -646,14 +895,18 @@ internal data class CheckinBoard(
             }
         }
 
-        private fun openDatabase(context: Context): SQLiteDatabase? {
+        private fun openDatabase(
+            context: Context,
+            writable: Boolean = true,
+        ): SQLiteDatabase? {
             val path = databaseFile(context) ?: return null
             return try {
-                val db = SQLiteDatabase.openDatabase(
-                    path.absolutePath,
-                    null,
-                    SQLiteDatabase.OPEN_READWRITE,
-                )
+                val flags = if (writable) {
+                    SQLiteDatabase.OPEN_READWRITE
+                } else {
+                    SQLiteDatabase.OPEN_READONLY
+                }
+                val db = SQLiteDatabase.openDatabase(path.absolutePath, null, flags)
                 db.rawQuery("PRAGMA busy_timeout = 3000", null).close()
                 db
             } catch (_: SQLiteException) {
@@ -661,17 +914,23 @@ internal data class CheckinBoard(
             }
         }
 
+        /** Visible so the provider can watch the live database for check-in changes. */
+        fun databasePath(context: Context): File? = databaseFile(context)
+
         private fun databaseFile(context: Context): File? {
             val config = File(context.dataDir, "system.json")
             if (config.isFile) {
                 try {
-                    val custom = JSONObject(config.readText()).optString("dataDir")
+                    val custom = JSONObject(config.readText()).optString("dataDir").trim()
                     if (custom.isNotEmpty()) {
-                        val file = File(custom, "abyss.db")
-                        if (file.isFile) return file
+                        // Always use the configured data dir. Never fall back to
+                        // the leftover app-private abyss.db — that stale copy
+                        // (often from first launch) has no recent check-ins and
+                        // hydrate would wipe the card to "0 done".
+                        return File(custom, "abyss.db")
                     }
                 } catch (_: Exception) {
-                    // Fall back to the default database beside the snapshot.
+                    // Fall through to the default database beside the snapshot.
                 }
             }
             val fallback = File(context.dataDir, "abyss.db")

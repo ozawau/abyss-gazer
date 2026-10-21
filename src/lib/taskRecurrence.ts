@@ -14,7 +14,7 @@ export type TaskRecurrence =
   | { kind: "daily"; since: string }
   | { kind: "interval"; days: number; since: string }
   | { kind: "weekly"; weekdays: number[]; since: string }
-  | { kind: "monthly-day"; days: number[]; since: string }
+  | { kind: "monthly-day"; direction: CountDirection; days: number[]; since: string }
   | { kind: "monthly-workday"; direction: CountDirection; indexes: number[]; since: string }
   | { kind: "monthly-restday"; direction: CountDirection; indexes: number[]; since: string }
   | { kind: "yearly"; months: number[]; days: number[]; since: string }
@@ -25,7 +25,7 @@ export type RecurrenceDraft =
   | { kind: "daily" }
   | { kind: "interval"; days: number }
   | { kind: "weekly"; weekdays: number[] }
-  | { kind: "monthly-day"; days: number[] }
+  | { kind: "monthly-day"; direction: CountDirection; days: number[] }
   | { kind: "monthly-workday"; direction: CountDirection; indexes: number[] }
   | { kind: "monthly-restday"; direction: CountDirection; indexes: number[] }
   | { kind: "yearly"; months: number[]; days: number[] }
@@ -109,7 +109,8 @@ export function parseTaskRecurrence(raw: string | null | undefined): TaskRecurre
   if (record.kind === "monthly-day") {
     const days = readNumberList(record, "days", "day", 1, 31);
     if (!days) return null;
-    return { kind: "monthly-day", days, since };
+    const direction = record.direction === "backward" ? "backward" : "forward";
+    return { kind: "monthly-day", direction, days, since };
   }
   if (record.kind === "monthly-workday" || record.kind === "monthly-restday") {
     const counted = readCounted(record);
@@ -208,7 +209,7 @@ export function recurrenceDraft(rule: TaskRecurrence | null): RecurrenceDraft {
   if (rule.kind === "daily") return { kind: "daily" };
   if (rule.kind === "interval") return { kind: "interval", days: rule.days };
   if (rule.kind === "weekly") return { kind: "weekly", weekdays: rule.weekdays };
-  if (rule.kind === "monthly-day") return { kind: "monthly-day", days: rule.days };
+  if (rule.kind === "monthly-day") return { kind: "monthly-day", direction: rule.direction, days: rule.days };
   if (rule.kind === "monthly-workday") {
     return { kind: "monthly-workday", direction: rule.direction, indexes: rule.indexes };
   }
@@ -227,7 +228,7 @@ function sameBody(rule: TaskRecurrence, draft: Exclude<RecurrenceDraft, { kind: 
     return sameNums(rule.weekdays, draft.weekdays);
   }
   if (rule.kind === "monthly-day" && draft.kind === "monthly-day") {
-    return sameNums(rule.days, draft.days);
+    return rule.direction === draft.direction && sameNums(rule.days, draft.days);
   }
   if (
     (rule.kind === "monthly-workday" && draft.kind === "monthly-workday") ||
@@ -264,7 +265,7 @@ export function stampRecurrence(
     return JSON.stringify({ kind: "weekly", weekdays: [...draft.weekdays].sort((a, b) => a - b), since });
   }
   if (draft.kind === "monthly-day") {
-    return JSON.stringify({ kind: "monthly-day", days: [...draft.days].sort((a, b) => a - b), since });
+    return JSON.stringify({ kind: "monthly-day", direction: draft.direction, days: [...draft.days].sort((a, b) => a - b), since });
   }
   if (draft.kind === "monthly-workday" || draft.kind === "monthly-restday") {
     return JSON.stringify({
@@ -299,7 +300,7 @@ export function recurrenceLabel(
     return t("tasks.repeatWeekly", { weekday });
   }
   if (rule.kind === "monthly-day") {
-    return t("tasks.repeatMonthlyDay", { day: joinNums(rule.days, locale) });
+    return t(rule.direction === "backward" ? "tasks.repeatMonthlyDayFromEnd" : "tasks.repeatMonthlyDay", { day: joinNums(rule.days, locale) });
   }
   if (rule.kind === "monthly-workday") {
     const n = joinNums(rule.indexes, locale);
@@ -424,7 +425,11 @@ export function recurrenceMatches(rule: TaskRecurrence, date: Date): boolean {
     return span >= 0 && span % (rule.days + 1) === 0;
   }
   if (rule.kind === "weekly") return rule.weekdays.includes(date.getDay());
-  if (rule.kind === "monthly-day") return rule.days.includes(date.getDate());
+  if (rule.kind === "monthly-day") {
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    const day = rule.direction === "backward" ? lastDay - date.getDate() + 1 : date.getDate();
+    return rule.days.includes(day);
+  }
   if (rule.kind === "monthly-workday") {
     return rule.indexes.some((index) => matchesOrdinal(date, isWorkday, rule.direction, index));
   }

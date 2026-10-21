@@ -1,6 +1,6 @@
 use crate::db::DbState;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HabitCheckin {
@@ -91,6 +91,7 @@ pub fn list_habit_checkins(
 /// Returns whether the task is checked in on that day after the toggle.
 #[tauri::command]
 pub fn toggle_habit_checkin(
+    app: AppHandle,
     db: State<'_, DbState>,
     task_id: String,
     day: String,
@@ -98,35 +99,40 @@ pub fn toggle_habit_checkin(
     if !valid_day(&day) {
         return Err("日期无效".into());
     }
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    if !task_exists(&conn, &task_id)? {
-        return Err("任务不存在".into());
-    }
-    let existing = match conn.query_row(
-        "SELECT 1 FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
-        rusqlite::params![task_id, day],
-        |_| Ok(1i64),
-    ) {
-        Ok(_) => true,
-        Err(rusqlite::Error::QueryReturnedNoRows) => false,
-        Err(err) => return Err(err.to_string()),
-    };
-    if existing {
-        conn.execute(
-            "DELETE FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
+    let result = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        if !task_exists(&conn, &task_id)? {
+            return Err("任务不存在".into());
+        }
+        let existing = match conn.query_row(
+            "SELECT 1 FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
             rusqlite::params![task_id, day],
-        )
-        .map_err(|e| e.to_string())?;
-        let tid = crate::sync_logical::checkin_tombstone_id(&task_id, &day);
-        crate::sync_logical::record_tombstone(&conn, "habit_checkin", &tid)?;
-        return Ok(false);
-    }
-    conn.execute(
-        "INSERT INTO habit_checkins (task_id, day, created_at) VALUES (?1, ?2, ?3)",
-        rusqlite::params![task_id, day, now_ms()],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(true)
+            |_| Ok(1i64),
+        ) {
+            Ok(_) => true,
+            Err(rusqlite::Error::QueryReturnedNoRows) => false,
+            Err(err) => return Err(err.to_string()),
+        };
+        if existing {
+            conn.execute(
+                "DELETE FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
+                rusqlite::params![task_id, day],
+            )
+            .map_err(|e| e.to_string())?;
+            let tid = crate::sync_logical::checkin_tombstone_id(&task_id, &day);
+            crate::sync_logical::record_tombstone(&conn, "habit_checkin", &tid)?;
+            Ok::<bool, String>(false)
+        } else {
+            conn.execute(
+                "INSERT INTO habit_checkins (task_id, day, created_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![task_id, day, now_ms()],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok::<bool, String>(true)
+        }
+    }?;
+    crate::widget::publish_now(&app);
+    Ok(result)
 }
 
 #[tauri::command]
@@ -194,6 +200,7 @@ fn in_habit_tree(conn: &rusqlite::Connection, habit_id: &str, task_id: &str) -> 
 
 #[tauri::command]
 pub fn save_habit_checkin(
+    app: AppHandle,
     db: State<'_, DbState>,
     input: SaveHabitCheckinInput,
 ) -> Result<(), String> {
@@ -204,58 +211,61 @@ pub fn save_habit_checkin(
     if note.chars().count() > 4000 {
         return Err("描述不能超过 4000 字".into());
     }
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    if !task_exists(&conn, &input.task_id)? {
-        return Err("任务不存在".into());
-    }
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    if !input.checked {
-        tx.execute(
-            "DELETE FROM habit_checkin_items WHERE habit_id = ?1 AND day = ?2",
-            rusqlite::params![input.task_id, input.day],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "DELETE FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
-            rusqlite::params![input.task_id, input.day],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-        let tid = crate::sync_logical::checkin_tombstone_id(&input.task_id, &input.day);
-        crate::sync_logical::record_tombstone(&conn, "habit_checkin", &tid)?;
-        return Ok(());
-    }
-
-    let mut task_ids = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for task_id in input.task_ids {
-        if !seen.insert(task_id.clone()) {
-            continue;
+    {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        if !task_exists(&conn, &input.task_id)? {
+            return Err("任务不存在".into());
         }
-        if in_habit_tree(&tx, &input.task_id, &task_id)? {
-            task_ids.push(task_id);
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        if !input.checked {
+            tx.execute(
+                "DELETE FROM habit_checkin_items WHERE habit_id = ?1 AND day = ?2",
+                rusqlite::params![input.task_id, input.day],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "DELETE FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
+                rusqlite::params![input.task_id, input.day],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.commit().map_err(|e| e.to_string())?;
+            let tid = crate::sync_logical::checkin_tombstone_id(&input.task_id, &input.day);
+            crate::sync_logical::record_tombstone(&conn, "habit_checkin", &tid)?;
+        } else {
+            let mut task_ids = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for task_id in input.task_ids {
+                if !seen.insert(task_id.clone()) {
+                    continue;
+                }
+                if in_habit_tree(&tx, &input.task_id, &task_id)? {
+                    task_ids.push(task_id);
+                }
+            }
+
+            tx.execute(
+                "INSERT INTO habit_checkins (task_id, day, created_at, note)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(task_id, day) DO UPDATE SET
+                 created_at = excluded.created_at, note = excluded.note",
+                rusqlite::params![input.task_id, input.day, now_ms(), note],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "DELETE FROM habit_checkin_items WHERE habit_id = ?1 AND day = ?2",
+                rusqlite::params![input.task_id, input.day],
+            )
+            .map_err(|e| e.to_string())?;
+            for task_id in task_ids {
+                tx.execute(
+                    "INSERT INTO habit_checkin_items (habit_id, task_id, day) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![input.task_id, task_id, input.day],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            tx.commit().map_err(|e| e.to_string())?;
         }
     }
-
-    tx.execute(
-        "INSERT INTO habit_checkins (task_id, day, created_at, note)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(task_id, day) DO UPDATE SET note = excluded.note",
-        rusqlite::params![input.task_id, input.day, now_ms(), note],
-    )
-    .map_err(|e| e.to_string())?;
-    tx.execute(
-        "DELETE FROM habit_checkin_items WHERE habit_id = ?1 AND day = ?2",
-        rusqlite::params![input.task_id, input.day],
-    )
-    .map_err(|e| e.to_string())?;
-    for task_id in task_ids {
-        tx.execute(
-            "INSERT INTO habit_checkin_items (habit_id, task_id, day) VALUES (?1, ?2, ?3)",
-            rusqlite::params![input.task_id, task_id, input.day],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
+    crate::widget::publish_now(&app);
     Ok(())
 }

@@ -39,6 +39,7 @@ class MainActivity : TauriActivity() {
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
     active = this
+    CheckinWidgetProvider.ensureWatching(this)
     backCallback?.remove()
     val callback = object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() {
@@ -142,6 +143,7 @@ class MainActivity : TauriActivity() {
   override fun onResume() {
     super.onResume()
     PomodoroTimerOverlay.onAppForegrounded()
+    CheckinWidgetProvider.ensureWatching(this)
     CheckinWidgetProvider.refresh(this)
     NoteTaskWidgetProvider.refresh(this)
     if (!sawResume) {

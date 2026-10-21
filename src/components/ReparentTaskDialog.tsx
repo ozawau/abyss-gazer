@@ -20,7 +20,8 @@ interface ReparentTaskDialogProps {
   tasks: Task[];
   categories: Category[];
   onClose: () => void;
-  onPick: (parentId: string) => Promise<void>;
+  /** `null` promotes the task to a root (outermost) task. */
+  onPick: (parentId: string | null) => Promise<void>;
 }
 
 function sortRoots(roots: Task[]): Task[] {
@@ -74,10 +75,13 @@ export function ReparentTaskDialog({
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set());
   const [pendingParent, setPendingParent] = useState<Task | null>(null);
+  const [pendingMakeRoot, setPendingMakeRoot] = useState(false);
   const [confirming, setConfirming] = useState(false);
   useDismissOnAndroidBack(open, () => {
-    if (pendingParent) setPendingParent(null);
-    else onClose();
+    if (pendingParent || pendingMakeRoot) {
+      setPendingParent(null);
+      setPendingMakeRoot(false);
+    } else onClose();
   }, rootRef);
 
   useEffect(() => {
@@ -85,6 +89,7 @@ export function ReparentTaskDialog({
     setCategoryFilter("all");
     setCollapsedIds(new Set());
     setPendingParent(null);
+    setPendingMakeRoot(false);
     setConfirming(false);
   }, [open, task?.id]);
 
@@ -130,17 +135,20 @@ export function ReparentTaskDialog({
     });
   }
 
-  async function confirmPick() {
-    if (!pendingParent || confirming) return;
+  async function confirmPick(parentId: string | null) {
+    if (confirming) return;
     setConfirming(true);
     try {
-      await onPick(pendingParent.id);
+      await onPick(parentId);
     } finally {
       setConfirming(false);
     }
   }
 
   if (!open || !task) return null;
+
+  const canMakeRoot = !!task.parent_id;
+  const awaitingConfirm = pendingMakeRoot || !!pendingParent;
 
   return (
     <div
@@ -160,7 +168,7 @@ export function ReparentTaskDialog({
         <p className="reparent-task-source">
           {t("tasks.attachAsSubtaskSource", { title: task.title })}
         </p>
-        {!pendingParent ? (
+        {!awaitingConfirm ? (
           <>
             <p className="reparent-task-hint">{t("tasks.attachAsSubtaskHint")}</p>
 
@@ -260,17 +268,51 @@ export function ReparentTaskDialog({
               </ul>
             )}
             <div className="modal-actions">
+              {canMakeRoot && (
+                <button
+                  type="button"
+                  className="secondary-btn modal-action-start"
+                  onClick={() => setPendingMakeRoot(true)}
+                >
+                  {t("tasks.makeRootTask")}
+                </button>
+              )}
               <button type="button" className="secondary-btn" onClick={onClose}>
                 {t("common.cancel")}
               </button>
             </div>
           </>
+        ) : pendingMakeRoot ? (
+          <div className="reparent-task-confirm">
+            <p className="reparent-task-confirm-body">
+              {t("tasks.makeRootTaskConfirm", { title: task.title })}
+            </p>
+            <p className="reparent-task-hint">{t("tasks.makeRootTaskHint")}</p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="secondary-btn"
+                disabled={confirming}
+                onClick={() => setPendingMakeRoot(false)}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="primary-btn"
+                disabled={confirming}
+                onClick={() => void confirmPick(null)}
+              >
+                {t("common.confirm")}
+              </button>
+            </div>
+          </div>
         ) : (
           <div className="reparent-task-confirm">
             <p className="reparent-task-confirm-body">
               {t("tasks.attachAsSubtaskConfirm", {
                 child: task.title,
-                parent: pendingParent.title,
+                parent: pendingParent!.title,
               })}
             </p>
             <p className="reparent-task-hint">{t("tasks.attachAsSubtaskHint")}</p>
@@ -287,7 +329,7 @@ export function ReparentTaskDialog({
                 type="button"
                 className="primary-btn"
                 disabled={confirming}
-                onClick={() => void confirmPick()}
+                onClick={() => void confirmPick(pendingParent!.id)}
               >
                 {t("common.confirm")}
               </button>

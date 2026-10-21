@@ -4,7 +4,7 @@ use std::fs;
 #[cfg(target_os = "android")]
 use std::io::Write;
 #[cfg(target_os = "android")]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "android")]
 use std::sync::OnceLock;
 #[cfg(target_os = "android")]
@@ -17,6 +17,10 @@ use tauri::Manager;
 
 #[cfg(target_os = "android")]
 static DIRTY: AtomicBool = AtomicBool::new(false);
+/// Bumped on every publish so a mid-transaction snapshot cannot overwrite a
+/// newer post-commit publish (update_hook fires before COMMIT).
+#[cfg(target_os = "android")]
+static PUBLISH_GEN: AtomicU64 = AtomicU64::new(0);
 #[cfg(target_os = "android")]
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 
@@ -25,6 +29,27 @@ static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 pub fn request_publish() {
     #[cfg(target_os = "android")]
     DIRTY.store(true, Ordering::Relaxed);
+}
+
+/// Write the snapshot and refresh widgets immediately (Android only).
+pub fn publish_now(app: &tauri::AppHandle) {
+    #[cfg(target_os = "android")]
+    {
+        // Clear dirty first so the background loop does not immediately redo a
+        // stale mid-tx read; bump generation so older publishes abort.
+        DIRTY.store(false, Ordering::Release);
+        let gen = PUBLISH_GEN.fetch_add(1, Ordering::AcqRel) + 1;
+        publish_once(app, gen);
+        // update_hook may have set DIRTY again while we published; leave it.
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = app;
+}
+
+#[tauri::command]
+pub fn refresh_checkin_widget(app: tauri::AppHandle) -> Result<(), String> {
+    publish_now(&app);
+    Ok(())
 }
 
 pub fn install(app: &tauri::AppHandle) {
@@ -116,33 +141,98 @@ fn install_android(app: &tauri::AppHandle) {
                 continue;
             }
             let Some(app) = APP.get() else {
+                DIRTY.store(true, Ordering::Relaxed);
                 continue;
             };
-            publish_once(app);
+            // Wait out in-flight transactions: update_hook marks dirty before
+            // COMMIT, and a snapshot taken then would miss the new check-in.
+            std::thread::sleep(Duration::from_millis(250));
+            loop {
+                let gen = PUBLISH_GEN.fetch_add(1, Ordering::AcqRel) + 1;
+                publish_once(app, gen);
+                if !DIRTY.swap(false, Ordering::AcqRel) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(120));
+            }
         })
         .ok();
 }
 
 #[cfg(target_os = "android")]
-fn publish_once(app: &tauri::AppHandle) {
+fn publish_once(app: &tauri::AppHandle, gen: u64) {
+    if PUBLISH_GEN.load(Ordering::Acquire) != gen {
+        return;
+    }
+    // Home-screen taps write the DB + JSON themselves. A concurrent publish
+    // that started from an older dirty flag can briefly rewrite the snapshot
+    // without the new check-in (2 done → 1 done). Honour the quiet file.
+    if widget_toggle_quiet(app) {
+        DIRTY.store(true, Ordering::Relaxed);
+        return;
+    }
     let Some(state) = app.try_state::<crate::db::DbState>() else {
         DIRTY.store(true, Ordering::Relaxed);
         return;
     };
-    let conn = match state.conn.lock() {
+    let db_path = match state.db_path.lock() {
+        Ok(path) => path.clone(),
+        Err(_) => {
+            DIRTY.store(true, Ordering::Relaxed);
+            return;
+        }
+    };
+    drop(state);
+    if PUBLISH_GEN.load(Ordering::Acquire) != gen {
+        return;
+    }
+    // Open a fresh connection so home-screen toggles and app writes are both
+    // visible, instead of relying on the long-lived locked connection.
+    let conn = match crate::db::open_db_for_read(&db_path) {
         Ok(conn) => conn,
-        Err(_) => return,
+        Err(err) => {
+            eprintln!("checkin widget open: {err}");
+            DIRTY.store(true, Ordering::Relaxed);
+            return;
+        }
     };
     let language = crate::system_config::read_system_settings(app)
         .map(|settings| settings.language)
         .unwrap_or_else(|_| "system".into());
+    if PUBLISH_GEN.load(Ordering::Acquire) != gen {
+        return;
+    }
     if let Err(err) = write_snapshot(app, &conn, &language) {
         eprintln!("checkin widget: {err}");
+        DIRTY.store(true, Ordering::Relaxed);
         return;
     }
     drop(conn);
-    drop(state);
+    // Skip notify if a newer publish already started — its write + notify win.
+    if PUBLISH_GEN.load(Ordering::Acquire) != gen {
+        return;
+    }
     notify_widgets(app);
+}
+
+/// True when the Android widget asked publishers to stay quiet after a tap.
+#[cfg(target_os = "android")]
+fn widget_toggle_quiet(app: &tauri::AppHandle) -> bool {
+    let Ok(dir) = app.path().app_data_dir() else {
+        return false;
+    };
+    let path = dir.join("checkin-widget.quiet");
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(marked_at) = raw.trim().parse::<u128>() else {
+        return false;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    now.saturating_sub(marked_at) < 1_500
 }
 
 #[cfg(target_os = "android")]
@@ -169,12 +259,20 @@ fn write_snapshot(
         file.sync_all().map_err(|err| err.to_string())?;
     }
     fs::rename(&tmp, &path).map_err(|err| err.to_string())?;
+    // Side-channel tick so FileObserver always sees a CLOSE_WRITE even when
+    // some OEMs skip MOVED_TO for the atomic rename.
+    let tick = path.with_extension("tick");
+    let _ = fs::write(&tick, format!("{}\n", PUBLISH_GEN.load(Ordering::Relaxed)));
     Ok(())
 }
 
 #[cfg(target_os = "android")]
 fn notify_widgets(app: &tauri::AppHandle) {
     use tauri::Manager;
+    // Never block the invoke / publisher thread waiting for the webview: that
+    // deadlocks Android when save_habit_checkin is awaited from JS. The
+    // FileObserver on checkin-widget.json is the reliable redraw path; JNI
+    // refresh is best-effort.
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
@@ -196,17 +294,24 @@ fn notify_widgets(app: &tauri::AppHandle) {
                 return;
             };
             let class = jni::objects::JClass::from(class);
-            if env
-                .call_static_method(
-                    class,
-                    "refresh",
-                    "(Landroid/content/Context;)V",
-                    &[jni::objects::JValue::Object(activity)],
-                )
-                .is_err()
-                || env.exception_check().unwrap_or(false)
-            {
-                let _ = env.exception_clear();
+            let app_ctx = env
+                .call_method(activity, "getApplicationContext", "()Landroid/content/Context;", &[])
+                .ok()
+                .and_then(|value| value.l().ok());
+            let ctx = app_ctx.as_ref().unwrap_or(activity);
+            for method in ["ensureWatching", "refresh", "requestRefreshBroadcast"] {
+                if env
+                    .call_static_method(
+                        &class,
+                        method,
+                        "(Landroid/content/Context;)V",
+                        &[jni::objects::JValue::Object(ctx)],
+                    )
+                    .is_err()
+                    || env.exception_check().unwrap_or(false)
+                {
+                    let _ = env.exception_clear();
+                }
             }
         });
     });

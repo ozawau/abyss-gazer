@@ -90,6 +90,7 @@ pub fn run() {
             get_db_path,
             reopen_database,
             widget::request_pin_checkin_widget,
+            widget::refresh_checkin_widget,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

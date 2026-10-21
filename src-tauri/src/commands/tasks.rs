@@ -78,7 +78,8 @@ pub struct SpawnRecurringOutcome {
 #[derive(Debug, Deserialize)]
 pub struct ReparentTaskInput {
     pub id: String,
-    pub parent_id: String,
+    /// `None` promotes the task to a root (outermost) task.
+    pub parent_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -533,25 +534,39 @@ pub fn reparent_task(
     db: State<'_, DbState>,
     input: ReparentTaskInput,
 ) -> Result<Vec<Task>, String> {
-    if input.id == input.parent_id {
+    if input.parent_id.as_ref() == Some(&input.id) {
         return Err("不能将任务设为自己的子任务".into());
     }
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    fetch_task(&conn, &input.id)?;
-    let parent = fetch_task(&conn, &input.parent_id)?;
-    let descendants = collect_descendant_ids(&conn, &input.id)?;
-    if descendants.iter().any(|id| id == &input.parent_id) {
-        return Err("不能移动到自身下级任务下".into());
-    }
-    let sort_order = next_sort_order_end(&conn, &input.parent_id)?;
-    let priority = parent.priority.clone();
-    let category_id = parent.category_id.clone();
+    let moving = fetch_task(&conn, &input.id)?;
     let updated_at = now_ms();
+
+    let (parent_id, priority, category_id, sort_order) =
+        if let Some(ref parent_id) = input.parent_id {
+            let parent = fetch_task(&conn, parent_id)?;
+            let descendants = collect_descendant_ids(&conn, &input.id)?;
+            if descendants.iter().any(|id| id == parent_id) {
+                return Err("不能移动到自身下级任务下".into());
+            }
+            let sort_order = next_sort_order_end(&conn, parent_id)?;
+            (
+                Some(parent.id),
+                parent.priority,
+                parent.category_id,
+                sort_order,
+            )
+        } else {
+            let priority = moving.priority.clone();
+            let category_id = moving.category_id.clone();
+            let sort_order = next_sort_order_front(&conn, &priority, None)?;
+            (None, priority, category_id, sort_order)
+        };
+
     conn.execute(
         "UPDATE tasks SET parent_id = ?1, priority = ?2, category_id = ?3, sort_order = ?4, updated_at = ?5
          WHERE id = ?6",
         rusqlite::params![
-            input.parent_id,
+            parent_id,
             priority,
             category_id,
             sort_order,
@@ -854,8 +869,14 @@ fn canonical_recurrence(raw: &str) -> Result<String, String> {
         }
         "monthly-day" => {
             let days = read_number_list(obj, "days", "day", 1, 31)?;
+            let direction = match obj.get("direction").and_then(|item| item.as_str()) {
+                Some("backward") => "backward",
+                Some("forward") | None => "forward",
+                _ => return Err("Invalid recurrence".into()),
+            };
             out.insert("kind".into(), serde_json::json!("monthly-day"));
             out.insert("days".into(), serde_json::json!(days));
+            out.insert("direction".into(), serde_json::json!(direction));
         }
         "monthly-workday" | "monthly-restday" => {
             let (direction, indexes) = read_counts(obj)?;
@@ -1125,6 +1146,14 @@ mod tests {
         let days =
             canonical_recurrence(r#"{"kind":"monthly-day","days":[3,1,2,1]}"#).unwrap();
         assert!(days.contains(r#""days":[1,2,3]"#));
+        assert!(days.contains(r#""direction":"forward""#));
+        let backward = canonical_recurrence(
+            r#"{"kind":"monthly-day","direction":"backward","days":[2,1],"since":"2026-10-16"}"#,
+        ).unwrap();
+        assert!(backward.contains(r#""direction":"backward""#));
+        assert!(backward.contains(r#""days":[1,2]"#));
+        assert!(backward.contains(r#""since":"2026-10-16""#));
+        assert!(canonical_recurrence(r#"{"kind":"monthly-day","direction":"invalid","days":[1]}"#).is_err());
         let counted = canonical_recurrence(
             r#"{"kind":"monthly-workday","direction":"forward","indexes":[3,1]}"#,
         )

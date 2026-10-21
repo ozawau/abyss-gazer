@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+} from "react";
+import { createPortal } from "react-dom";
 import { CheckinWeekdayFields } from "../components/CheckinWeekdayFields";
 import { HabitCheckinDialog } from "../components/HabitCheckinDialog";
+import { placeAnchoredTaskCard } from "../components/TaskHoverCard";
 import { useI18n } from "../components/LocaleProvider";
 import { WEEKDAY_SHORT } from "../lib/i18n";
 import {
@@ -422,6 +432,23 @@ export function CheckinView({
     return details.get(checkinKey(task.id, dayKey(day)))?.note ?? "";
   }
 
+  function detailCheckedTitles(task: Task, day: Date): string[] {
+    const ids = selectionFor(task, day);
+    if (ids.length === 0) return [];
+    const byId = new Map(tasks.map((row) => [row.id, row]));
+    const titles: string[] = [];
+    const seen = new Set<string>();
+    for (const id of ids) {
+      // Parent habit itself is the float title; only list checked subtasks.
+      if (id === task.id) continue;
+      const row = byId.get(id);
+      if (!row || seen.has(row.title)) continue;
+      seen.add(row.title);
+      titles.push(row.title);
+    }
+    return titles;
+  }
+
   function clockTaskIds(habit: Task, day: Date): string[] {
     const family = new Set([habit.id, ...descendantIds(habit.id, tasks)]);
     const target = dayKey(startOfLocalDay(day));
@@ -585,6 +612,7 @@ export function CheckinView({
 
       <div className="calendar-filters">
         <strong className="calendar-period-title">{title}</strong>
+        <span className="habit-note-legend"><HabitNoteIndicator />{t("checkin.hasNote")}</span>
       </div>
 
       {error && <p className="error-banner">{error}</p>}
@@ -607,6 +635,7 @@ export function CheckinView({
           markFor={markFor}
           checkedByClock={checkedByClock}
           detailNote={detailNote}
+          detailCheckedTitles={detailCheckedTitles}
           onOpen={openCheckin}
           onSelectDay={setCursor}
         />
@@ -644,6 +673,7 @@ export function CheckinView({
             markFor={markFor}
             checkedByClock={checkedByClock}
             detailNote={detailNote}
+            detailCheckedTitles={detailCheckedTitles}
             streaks={streaks.byHabit}
             perfectStreak={streaks.perfect}
             onOpen={openCheckin}
@@ -760,23 +790,192 @@ function CheckinScheduleDialog({
   );
 }
 
+function HabitNoteIndicator() {
+  return (
+    <span className="habit-note-indicator" aria-hidden="true">
+      <svg viewBox="0 0 16 16" fill="none">
+        <path d="M4 1.5h5l3 3v10H4z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+        <path d="M9 1.5v3h3M6 8h4M6 11h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
+function HabitNoteButton({
+  note,
+  noteTitle,
+  noteDay,
+  checkedTitles = [],
+  children,
+  onClick,
+  title,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  note: string;
+  noteTitle: string;
+  noteDay: string;
+  checkedTitles?: string[];
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const hideTimer = useRef<number | null>(null);
+  const tooltipId = useId();
+  const trimmedNote = note.trim();
+  const hasNote = trimmedNote.length > 0;
+  const hasChecked = checkedTitles.length > 0;
+  const hasDetail = hasNote || hasChecked;
+  const visible = open && hasDetail;
+
+  function cancelHide() {
+    if (hideTimer.current != null) window.clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+  }
+
+  function hideSoon() {
+    cancelHide();
+    hideTimer.current = window.setTimeout(() => setOpen(false), 150);
+  }
+
+  useEffect(() => () => cancelHide(), []);
+
+  useLayoutEffect(() => {
+    if (!visible || !buttonRef.current) return;
+    placeAnchoredTaskCard(cardRef.current, buttonRef.current.getBoundingClientRect());
+  }, [visible, note, noteTitle, noteDay, checkedTitles]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const dismiss = () => setOpen(false);
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && cardRef.current?.contains(event.target)) return;
+      dismiss();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dismiss();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node &&
+        (buttonRef.current?.contains(event.target) || cardRef.current?.contains(event.target))) return;
+      dismiss();
+    };
+    window.addEventListener("resize", dismiss);
+    window.addEventListener("blur", dismiss);
+    document.addEventListener("scroll", onScroll, true);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("resize", dismiss);
+      window.removeEventListener("blur", dismiss);
+      document.removeEventListener("scroll", onScroll, true);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [visible]);
+
+  return (
+    <>
+      <button
+        {...props}
+        ref={buttonRef}
+        title={hasDetail ? undefined : title}
+        aria-describedby={visible ? tooltipId : undefined}
+        onPointerEnter={(event) => {
+          if (event.pointerType !== "mouse" || !hasDetail) return;
+          cancelHide();
+          setOpen(true);
+        }}
+        onPointerLeave={hideSoon}
+        onFocus={() => {
+          if (!hasDetail) return;
+          cancelHide();
+          setOpen(true);
+        }}
+        onBlur={() => {
+          cancelHide();
+          setOpen(false);
+        }}
+        onClick={(event) => {
+          cancelHide();
+          setOpen(false);
+          onClick?.(event);
+        }}
+      >
+        {children}
+      </button>
+      {visible && createPortal(
+        <div
+          ref={cardRef}
+          id={tooltipId}
+          role="tooltip"
+          className="habit-note-tooltip"
+          onPointerEnter={cancelHide}
+          onPointerLeave={hideSoon}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <strong>{noteTitle}</strong>
+          {hasChecked && (
+            <>
+              <span>{t("checkin.checkedTasks")}</span>
+              <ul className="habit-note-checked">
+                {checkedTitles.map((titleText) => (
+                  <li key={titleText}>{titleText}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {hasNote && (
+            <>
+              <span>{noteDay} · {t("checkin.note")}</span>
+              <p>{trimmedNote}</p>
+            </>
+          )}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
 function HabitMark({
   mark,
   label,
   title,
+  note,
+  checkedTitles,
+  taskTitle,
+  day,
   onClick,
 }: {
   mark: Mark;
   label: string;
   title?: string;
+  note: string;
+  checkedTitles: string[];
+  taskTitle: string;
+  day: Date;
   onClick: () => void;
 }) {
+  const { t } = useI18n();
   const checked = mark === "checked";
+  const hasNote = note.trim().length > 0;
+  const hasChecked = checkedTitles.length > 0;
+  const detailHint = [
+    hasNote ? t("checkin.hasNote") : "",
+    hasChecked ? t("checkin.hasCheckedTasks") : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <button
+    <HabitNoteButton
+      note={note}
+      noteTitle={taskTitle}
+      noteDay={dayKey(day)}
+      checkedTitles={checkedTitles}
       type="button"
       className={`habit-mark${checked ? " is-checked" : " is-missed"}`}
-      aria-label={label}
+      aria-label={detailHint ? `${label} · ${detailHint}` : label}
       aria-pressed={checked}
       title={title}
       onClick={(event) => {
@@ -785,7 +984,8 @@ function HabitMark({
       }}
     >
       <span aria-hidden>{checked ? "✓" : "✗"}</span>
-    </button>
+      {(hasNote || hasChecked) && <HabitNoteIndicator />}
+    </HabitNoteButton>
   );
 }
 
@@ -798,6 +998,7 @@ function MonthCheckins({
   markFor,
   checkedByClock,
   detailNote,
+  detailCheckedTitles,
   onOpen,
   onSelectDay,
 }: {
@@ -809,6 +1010,7 @@ function MonthCheckins({
   markFor: (task: Task, day: Date) => Mark | null;
   checkedByClock: (task: Task, day: Date) => boolean;
   detailNote: (task: Task, day: Date) => string;
+  detailCheckedTitles: (task: Task, day: Date) => string[];
   onOpen: (task: Task, day: Date) => void;
   onSelectDay: (day: Date) => void;
 }) {
@@ -873,21 +1075,42 @@ function MonthCheckins({
                     const on = mark === "checked";
                     const byClock = checkedByClock(task, day);
                     const note = detailNote(task, day);
+                    const checkedTitles = detailCheckedTitles(task, day);
+                    const hasNote = note.trim().length > 0;
+                    const hasChecked = checkedTitles.length > 0;
                     const status = on
                       ? byClock
                         ? t("checkin.checkedByClock")
                         : t("checkin.checked")
                       : t("checkin.missed");
-                    const title = [byClock ? t("checkin.clockNote") : "", note]
+                    const detailHint = [
+                      hasNote ? t("checkin.hasNote") : "",
+                      hasChecked ? t("checkin.hasCheckedTasks") : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
+                    const title = [
+                      byClock ? t("checkin.clockNote") : "",
+                      note,
+                      checkedTitles.length
+                        ? `${t("checkin.checkedTasks")}: ${checkedTitles.join(
+                            locale === "zh" ? "、" : ", ",
+                          )}`
+                        : "",
+                    ]
                       .filter(Boolean)
                       .join("\n");
                     return (
                       <li key={task.id}>
-                        <button
+                        <HabitNoteButton
+                          note={note}
+                          noteTitle={task.title}
+                          noteDay={dayKey(day)}
+                          checkedTitles={checkedTitles}
                           type="button"
                           className="habit-month-item"
                           aria-pressed={on}
-                          aria-label={`${task.title}${status}`}
+                          aria-label={`${task.title}${status}${detailHint ? ` · ${detailHint}` : ""}`}
                           title={title || undefined}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -895,13 +1118,14 @@ function MonthCheckins({
                           }}
                         >
                           <span className="habit-month-title">{task.title}</span>
+                          {(hasNote || hasChecked) && <HabitNoteIndicator />}
                           <span
                             className={`habit-glyph${on ? " is-checked" : " is-missed"}`}
                             aria-hidden
                           >
                             {on ? "✓" : "✗"}
                           </span>
-                        </button>
+                        </HabitNoteButton>
                       </li>
                     );
                   })}
@@ -951,6 +1175,7 @@ function WeekCheckins({
   markFor,
   checkedByClock,
   detailNote,
+  detailCheckedTitles,
   streaks,
   perfectStreak,
   onOpen,
@@ -962,6 +1187,7 @@ function WeekCheckins({
   markFor: (task: Task, day: Date) => Mark | null;
   checkedByClock: (task: Task, day: Date) => boolean;
   detailNote: (task: Task, day: Date) => string;
+  detailCheckedTitles: (task: Task, day: Date) => string[];
   streaks: Map<string, StreakSpan>;
   perfectStreak: StreakSpan;
   onSchedule: (task: Task) => void;
@@ -1008,6 +1234,8 @@ function WeekCheckins({
           <RecordCell current={streak.current} best={streak.best} />
           {days.map((day) => {
             const mark = markFor(task, day);
+            const note = detailNote(task, day);
+            const checkedTitles = detailCheckedTitles(task, day);
             const weekend = day.getDay() === 0 || day.getDay() === 6;
             return (
               <div
@@ -1020,6 +1248,10 @@ function WeekCheckins({
                 {mark && (
                   <HabitMark
                     mark={mark}
+                    note={note}
+                    checkedTitles={checkedTitles}
+                    taskTitle={task.title}
+                    day={day}
                     label={t("checkin.dayStatus", {
                       title: task.title,
                       date: t("checkin.monthDay", {
@@ -1036,7 +1268,12 @@ function WeekCheckins({
                     title={
                       [
                         checkedByClock(task, day) ? t("checkin.clockNote") : "",
-                        detailNote(task, day),
+                        note,
+                        checkedTitles.length
+                          ? `${t("checkin.checkedTasks")}: ${checkedTitles.join(
+                              locale === "zh" ? "、" : ", ",
+                            )}`
+                          : "",
                       ]
                         .filter(Boolean)
                         .join("\n") || undefined

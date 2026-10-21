@@ -265,13 +265,14 @@ object NoteTaskActions {
         val config = File(context.dataDir, "system.json")
         if (config.isFile) {
             try {
-                val custom = JSONObject(config.readText()).optString("dataDir")
+                val custom = JSONObject(config.readText()).optString("dataDir").trim()
                 if (custom.isNotEmpty()) {
-                    val file = File(custom, "abyss.db")
-                    if (file.isFile) return file
+                    // Prefer configured data dir; do not fall back to a stale
+                    // app-private abyss.db left over from first launch.
+                    return File(custom, "abyss.db")
                 }
             } catch (_: Exception) {
-                // Fall back to the default database beside the snapshot.
+                // Fall through to the default database beside the snapshot.
             }
         }
         val fallback = File(context.dataDir, "abyss.db")

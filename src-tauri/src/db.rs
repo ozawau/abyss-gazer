@@ -10,6 +10,16 @@ pub struct DbState {
     pub db_path: Mutex<PathBuf>,
 }
 
+/// Open the database for a one-shot read (widget snapshot). Skips migrations
+/// and change hooks so the publisher cannot disturb writers.
+#[cfg(target_os = "android")]
+pub fn open_db_for_read(path: &Path) -> SqliteResult<Connection> {
+    let conn = Connection::open(path)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+    Ok(conn)
+}
+
 pub fn open_db(path: &Path) -> SqliteResult<Connection> {
     let conn = Connection::open(path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -73,10 +83,14 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
     migrate_schema(&conn)?;
     #[cfg(target_os = "android")]
     {
-        fn on_db_change(_: rusqlite::hooks::Action, _: &str, _: &str, _: i64) {
-            crate::widget::request_publish();
-        }
-        conn.update_hook(Some(on_db_change));
+        // Mark dirty on every row change. Autocommit statements do not fire
+        // commit_hook, and the publisher opens a fresh connection after a short
+        // delay so mid-transaction snapshots are avoided.
+        conn.update_hook(Some(
+            |_action: rusqlite::hooks::Action, _db: &str, _table: &str, _rowid: i64| {
+                crate::widget::request_publish();
+            },
+        ));
     }
     Ok(conn)
 }

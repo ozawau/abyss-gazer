@@ -1,10 +1,60 @@
 use rusqlite::{Connection, OptionalExtension};
+use serde::de::Deserializer;
+use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const SYNC_FORMAT_VERSION: u8 = 1;
 const SYNC_DIR: &str = "sync";
+
+/// Distinguishes a missing JSON key from an explicit `null`.
+/// Older sync files omit later-added fields; importing those must not wipe
+/// local values that still share the same `updated_at`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum FieldUpdate<T> {
+    #[default]
+    Absent,
+    Set(Option<T>),
+}
+
+impl<T> FieldUpdate<T> {
+    fn from_local(value: Option<T>) -> Self {
+        FieldUpdate::Set(value)
+    }
+
+    fn merge(&self, local: Option<T>, remote_wins: bool) -> Option<T>
+    where
+        T: Clone,
+    {
+        match self {
+            FieldUpdate::Absent => local,
+            FieldUpdate::Set(value) if remote_wins => value.clone(),
+            FieldUpdate::Set(value) => match (&local, value) {
+                (None, Some(_)) => value.clone(),
+                _ => local,
+            },
+        }
+    }
+}
+
+impl<'de, T> Deserialize<'de> for FieldUpdate<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(FieldUpdate::Set(Option::<T>::deserialize(deserializer)?))
+    }
+}
+
+impl<T: Serialize> Serialize for FieldUpdate<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            FieldUpdate::Absent => serializer.serialize_none(),
+            FieldUpdate::Set(value) => value.serialize(serializer),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SyncEnvelope<T> {
@@ -33,13 +83,13 @@ pub struct SyncTask {
     pub created_at: i64,
     pub updated_at: i64,
     #[serde(default)]
-    pub recurrence: Option<String>,
+    pub recurrence: FieldUpdate<String>,
     #[serde(default)]
-    pub recurrence_source_id: Option<String>,
+    pub recurrence_source_id: FieldUpdate<String>,
     #[serde(default)]
-    pub recurrence_occurrence: Option<String>,
+    pub recurrence_occurrence: FieldUpdate<String>,
     #[serde(default)]
-    pub checkin_weekdays: Option<String>,
+    pub checkin_weekdays: FieldUpdate<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -84,10 +134,18 @@ pub fn sync_root(data_dir: &Path) -> PathBuf {
 }
 
 pub fn record_tombstone(conn: &Connection, kind: &str, entity_id: &str) -> Result<(), String> {
-    let updated_at = now_ms();
+    record_tombstone_at(conn, kind, entity_id, now_ms())
+}
+
+fn record_tombstone_at(
+    conn: &Connection,
+    kind: &str,
+    entity_id: &str,
+    updated_at: i64,
+) -> Result<(), String> {
     conn.execute(
         "INSERT INTO sync_tombstones (kind, entity_id, updated_at) VALUES (?1, ?2, ?3)
-         ON CONFLICT(kind, entity_id) DO UPDATE SET updated_at = excluded.updated_at",
+         ON CONFLICT(kind, entity_id) DO UPDATE SET updated_at = MAX(updated_at, excluded.updated_at)",
         rusqlite::params![kind, entity_id, updated_at],
     )
     .map_err(|e| e.to_string())?;
@@ -238,6 +296,9 @@ fn drop_stale_tombstone(
 }
 
 fn apply_task_delete(conn: &Connection, id: &str, updated_at: i64) -> Result<(), String> {
+    if tombstone_updated_at(conn, "task", id)?.is_some_and(|ts| ts > updated_at) {
+        return Ok(());
+    }
     let local = local_task_updated_at(conn, id)?;
     if let Some(ts) = local {
         if ts > updated_at {
@@ -247,11 +308,41 @@ fn apply_task_delete(conn: &Connection, id: &str, updated_at: i64) -> Result<(),
     }
     conn.execute("DELETE FROM tasks WHERE id = ?1", [id])
         .map_err(|e| e.to_string())?;
-    let _ = conn.execute(
-        "DELETE FROM sync_tombstones WHERE kind = 'task' AND entity_id = ?1",
-        [id],
-    );
+    record_tombstone_at(conn, "task", id, updated_at)?;
     Ok(())
+}
+
+fn task_exists(conn: &Connection, id: &str) -> Result<bool, String> {
+    let n: i64 = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+            [id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n != 0)
+}
+
+fn local_task_extensions(
+    conn: &Connection,
+    id: &str,
+) -> Result<
+    Option<(
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )>,
+    String,
+> {
+    conn.query_row(
+        "SELECT recurrence, recurrence_source_id, recurrence_occurrence, checkin_weekdays
+         FROM tasks WHERE id = ?1",
+        [id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
 fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), String> {
@@ -269,11 +360,37 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
     if tombstone_updated_at(conn, "task", &t.id)?.is_some_and(|ts| ts > remote_ts) {
         return Ok(());
     }
-    if let Some(ts) = local_task_updated_at(conn, &t.id)? {
-        if ts >= remote_ts {
-            drop_stale_tombstone(conn, "task", &t.id, ts)?;
-            return Ok(());
-        }
+    let local_ts = local_task_updated_at(conn, &t.id)?;
+    if local_ts.is_some_and(|ts| ts > remote_ts) {
+        drop_stale_tombstone(conn, "task", &t.id, local_ts.unwrap())?;
+        return Ok(());
+    }
+    let remote_wins = local_ts.map(|ts| remote_ts > ts).unwrap_or(true);
+    let local_ext = local_task_extensions(conn, &t.id)?.unwrap_or((None, None, None, None));
+    let recurrence = t.recurrence.merge(local_ext.0, remote_wins);
+    let recurrence_source_id = t.recurrence_source_id.merge(local_ext.1, remote_wins);
+    let recurrence_occurrence = t.recurrence_occurrence.merge(local_ext.2, remote_wins);
+    let checkin_weekdays = t.checkin_weekdays.merge(local_ext.3, remote_wins);
+    if !remote_wins {
+        // Same timestamp: only fill extension fields that local is still missing.
+        conn.execute(
+            "UPDATE tasks SET
+             recurrence = COALESCE(recurrence, ?1),
+             recurrence_source_id = COALESCE(recurrence_source_id, ?2),
+             recurrence_occurrence = COALESCE(recurrence_occurrence, ?3),
+             checkin_weekdays = COALESCE(checkin_weekdays, ?4)
+             WHERE id = ?5",
+            rusqlite::params![
+                recurrence,
+                recurrence_source_id,
+                recurrence_occurrence,
+                checkin_weekdays,
+                t.id
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        drop_stale_tombstone(conn, "task", &t.id, remote_ts)?;
+        return Ok(());
     }
     conn.execute(
         "INSERT INTO tasks (id, title, notes, status, priority, sort_order, parent_id, category_id,
@@ -303,13 +420,13 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
             t.completed_at,
             t.created_at,
             t.updated_at,
-            t.recurrence,
-            t.recurrence_source_id,
-            t.recurrence_occurrence,
-            t.checkin_weekdays,
+            recurrence,
+            recurrence_source_id,
+            recurrence_occurrence,
+            checkin_weekdays,
         ],
     )
-        .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())?;
     drop_stale_tombstone(conn, "task", &t.id, remote_ts)?;
     Ok(())
 }
@@ -377,10 +494,10 @@ fn export_tasks(conn: &Connection, root: &Path) -> Result<(), String> {
                 completed_at: row.get(11)?,
                 created_at: row.get(12)?,
                 updated_at: row.get(13)?,
-                recurrence: row.get(14)?,
-                recurrence_source_id: row.get(15)?,
-                recurrence_occurrence: row.get(16)?,
-                checkin_weekdays: row.get(17)?,
+                recurrence: FieldUpdate::from_local(row.get(14)?),
+                recurrence_source_id: FieldUpdate::from_local(row.get(15)?),
+                recurrence_occurrence: FieldUpdate::from_local(row.get(16)?),
+                checkin_weekdays: FieldUpdate::from_local(row.get(17)?),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -418,6 +535,9 @@ fn import_categories(conn: &Connection, root: &Path) -> Result<(), String> {
             .unwrap_or("")
             .to_string();
         if env.deleted {
+            if tombstone_updated_at(conn, "category", &id)?.is_some_and(|ts| ts > env.updated_at) {
+                continue;
+            }
             let local: Option<i64> = conn
                 .query_row(
                     "SELECT updated_at FROM categories WHERE id = ?1",
@@ -431,9 +551,13 @@ fn import_categories(conn: &Connection, root: &Path) -> Result<(), String> {
             }
             conn.execute("DELETE FROM categories WHERE id = ?1", [&id])
                 .map_err(|e| e.to_string())?;
+            record_tombstone_at(conn, "category", &id, env.updated_at)?;
             continue;
         }
         let Some(c) = env.data else { continue };
+        if tombstone_updated_at(conn, "category", &c.id)?.is_some_and(|ts| ts > env.updated_at) {
+            continue;
+        }
         let local: Option<i64> = conn
             .query_row(
                 "SELECT updated_at FROM categories WHERE id = ?1",
@@ -452,6 +576,7 @@ fn import_categories(conn: &Connection, root: &Path) -> Result<(), String> {
             rusqlite::params![c.id, c.name, c.color, c.created_at, c.updated_at],
         )
         .map_err(|e| e.to_string())?;
+        drop_stale_tombstone(conn, "category", &c.id, env.updated_at)?;
     }
     Ok(())
 }
@@ -505,6 +630,9 @@ fn import_pomodoro_sessions(conn: &Connection, root: &Path) -> Result<(), String
         };
         let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
         if env.deleted {
+            if tombstone_updated_at(conn, "pomodoro", &id)?.is_some_and(|ts| ts > env.updated_at) {
+                continue;
+            }
             let local: Option<i64> = conn
                 .query_row(
                     "SELECT started_at FROM pomodoro_sessions WHERE id = ?1",
@@ -518,9 +646,18 @@ fn import_pomodoro_sessions(conn: &Connection, root: &Path) -> Result<(), String
             }
             conn.execute("DELETE FROM pomodoro_sessions WHERE id = ?1", [&id])
                 .map_err(|e| e.to_string())?;
+            record_tombstone_at(conn, "pomodoro", &id, env.updated_at)?;
             continue;
         }
         let Some(s) = env.data else { continue };
+        if tombstone_updated_at(conn, "pomodoro", &s.id)?.is_some_and(|ts| ts > env.updated_at) {
+            continue;
+        }
+        // Task may already be deleted locally (or only on this device). Never fail the
+        // whole sync on a dangling session — next export will prune / tombstone it.
+        if !task_exists(conn, &s.task_id)? {
+            continue;
+        }
         let local: Option<i64> = conn
             .query_row(
                 "SELECT started_at FROM pomodoro_sessions WHERE id = ?1",
@@ -529,7 +666,7 @@ fn import_pomodoro_sessions(conn: &Connection, root: &Path) -> Result<(), String
             )
             .optional()
             .map_err(|e| e.to_string())?;
-        if local.is_some_and(|ts| ts >= env.updated_at) {
+        if local.as_ref().is_some_and(|ts| *ts >= env.updated_at) {
             continue;
         }
         conn.execute(
@@ -550,6 +687,7 @@ fn import_pomodoro_sessions(conn: &Connection, root: &Path) -> Result<(), String
             ],
         )
         .map_err(|e| e.to_string())?;
+        drop_stale_tombstone(conn, "pomodoro", &s.id, env.updated_at)?;
     }
     Ok(())
 }
@@ -613,15 +751,46 @@ fn import_habit_checkins(conn: &Connection, root: &Path) -> Result<(), String> {
         };
         if env.deleted {
             if let Some(c) = env.data.as_ref() {
+                let key = checkin_tombstone_id(&c.task_id, &c.day);
+                if tombstone_updated_at(conn, "habit_checkin", &key)?
+                    .is_some_and(|ts| ts > env.updated_at)
+                {
+                    continue;
+                }
+                let local: Option<i64> = conn
+                    .query_row(
+                        "SELECT created_at FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
+                        rusqlite::params![c.task_id, c.day],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(|e| e.to_string())?;
+                if local.is_some_and(|ts| ts > env.updated_at) {
+                    continue;
+                }
                 conn.execute(
                     "DELETE FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
                     rusqlite::params![c.task_id, c.day],
                 )
                 .map_err(|e| e.to_string())?;
+                conn.execute(
+                    "DELETE FROM habit_checkin_items WHERE habit_id = ?1 AND day = ?2",
+                    rusqlite::params![c.task_id, c.day],
+                )
+                .map_err(|e| e.to_string())?;
+                record_tombstone_at(conn, "habit_checkin", &key, env.updated_at)?;
             }
             continue;
         }
         let Some(c) = env.data else { continue };
+        let key = checkin_tombstone_id(&c.task_id, &c.day);
+        if tombstone_updated_at(conn, "habit_checkin", &key)?.is_some_and(|ts| ts > env.updated_at)
+        {
+            continue;
+        }
+        if !task_exists(conn, &c.task_id)? {
+            continue;
+        }
         let local: Option<i64> = conn
             .query_row(
                 "SELECT created_at FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
@@ -639,6 +808,7 @@ fn import_habit_checkins(conn: &Connection, root: &Path) -> Result<(), String> {
             rusqlite::params![c.task_id, c.day, c.created_at, c.note],
         )
         .map_err(|e| e.to_string())?;
+        drop_stale_tombstone(conn, "habit_checkin", &key, c.created_at)?;
     }
     Ok(())
 }
@@ -715,6 +885,23 @@ fn import_habit_checkin_items(conn: &Connection, root: &Path) -> Result<(), Stri
             continue;
         }
         let Some(c) = env.data else { continue };
+        // Check-in items are derived from their parent habit check-in. A stale
+        // item from another device must not resurrect after that parent was
+        // unchecked locally.
+        let parent_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM habit_checkins WHERE task_id = ?1 AND day = ?2)",
+                rusqlite::params![c.habit_id, c.day],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())?
+            != 0;
+        if !parent_exists {
+            continue;
+        }
+        if !task_exists(conn, &c.habit_id)? || !task_exists(conn, &c.task_id)? {
+            continue;
+        }
         conn.execute(
             "INSERT OR IGNORE INTO habit_checkin_items (habit_id, task_id, day) VALUES (?1,?2,?3)",
             rusqlite::params![c.habit_id, c.task_id, c.day],
@@ -781,6 +968,28 @@ fn export_tombstones(conn: &Connection, root: &Path) -> Result<(), String> {
                 )
                 .optional()
                 .map_err(|e| e.to_string())?,
+            "pomodoro" => conn
+                .query_row(
+                    "SELECT started_at FROM pomodoro_sessions WHERE id = ?1",
+                    [&entity_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?,
+            "habit_checkin" => {
+                let parts: Vec<&str> = entity_id.splitn(2, '\u{1f}').collect();
+                if parts.len() == 2 {
+                    conn.query_row(
+                        "SELECT created_at FROM habit_checkins WHERE task_id = ?1 AND day = ?2",
+                        rusqlite::params![parts[0], parts[1]],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(|e| e.to_string())?
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
         if let Some(live_ts) = live {
@@ -808,6 +1017,18 @@ fn export_tombstones(conn: &Connection, root: &Path) -> Result<(), String> {
                 };
                 write_json(
                     &root.join("categories").join(format!("{entity_id}.json")),
+                    &env,
+                )?;
+            }
+            "pomodoro" => {
+                let env = SyncEnvelope::<SyncPomodoroSession> {
+                    v: SYNC_FORMAT_VERSION,
+                    updated_at,
+                    deleted: true,
+                    data: None,
+                };
+                write_json(
+                    &root.join("pomodoro_sessions").join(format!("{entity_id}.json")),
                     &env,
                 )?;
             }
@@ -912,6 +1133,88 @@ mod tests {
     }
 
     #[test]
+    fn missing_recurrence_does_not_wipe_local_template() {
+        let dir = std::env::temp_dir().join(format!(
+            "abyss-sync-recurrence-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("sync/tasks")).unwrap();
+        let conn = open_db(&dir.join("abyss.db")).expect("open");
+        let recurrence =
+            r#"{"kind":"weekly","since":"2026-10-08","weekday":4}"#;
+        conn.execute(
+            "INSERT INTO tasks (id, title, notes, status, priority, sort_order, created_at, updated_at, recurrence)
+             VALUES ('tmpl', '周报', '', 'todo', 'high', 0, 100, 200, ?1)",
+            [recurrence],
+        )
+        .unwrap();
+        // Old sync payloads omit the later-added recurrence fields entirely.
+        std::fs::write(
+            dir.join("sync/VERSION"),
+            format!("{SYNC_FORMAT_VERSION}\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("sync/tasks/tmpl.json"),
+            r#"{"v":1,"updated_at":200,"deleted":false,"data":{"id":"tmpl","title":"周报","notes":"","status":"todo","priority":"high","sortOrder":0,"parentId":null,"categoryId":null,"estimatePomodoros":0,"dueAt":null,"startAt":null,"completedAt":null,"createdAt":100,"updatedAt":200}}"#,
+        )
+        .unwrap();
+        import_logical(&conn, &dir).expect("import");
+        let kept: Option<String> = conn
+            .query_row(
+                "SELECT recurrence FROM tasks WHERE id = 'tmpl'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept.as_deref(), Some(recurrence));
+
+        // Same timestamp with a complete remote file fills a missing local field.
+        conn.execute("UPDATE tasks SET recurrence = NULL WHERE id = 'tmpl'", [])
+            .unwrap();
+        let fill = serde_json::json!({
+            "v": 1,
+            "updated_at": 200,
+            "deleted": false,
+            "data": {
+                "id": "tmpl",
+                "title": "周报",
+                "notes": "",
+                "status": "todo",
+                "priority": "high",
+                "sortOrder": 0,
+                "parentId": null,
+                "categoryId": null,
+                "estimatePomodoros": 0,
+                "dueAt": null,
+                "startAt": null,
+                "completedAt": null,
+                "createdAt": 100,
+                "updatedAt": 200,
+                "recurrence": recurrence,
+            }
+        });
+        std::fs::write(
+            dir.join("sync/tasks/tmpl.json"),
+            serde_json::to_string(&fill).unwrap(),
+        )
+        .unwrap();
+        import_logical(&conn, &dir).expect("import fill");
+        let filled: Option<String> = conn
+            .query_row(
+                "SELECT recurrence FROM tasks WHERE id = 'tmpl'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(filled.as_deref(), Some(recurrence));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn newer_task_drops_stale_delete() {
         let dir = std::env::temp_dir().join(format!(
             "abyss-sync-tomb-{}",
@@ -948,4 +1251,45 @@ mod tests {
         assert_eq!(left, 0);
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn pomodoro_for_missing_task_is_skipped() {
+        let dir = std::env::temp_dir().join(format!(
+            "abyss-sync-orphan-pomo-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("sync/pomodoro_sessions")).unwrap();
+        std::fs::write(dir.join("sync/VERSION"), "1\n").unwrap();
+        let conn = open_db(&dir.join("abyss.db")).expect("open");
+        let env = SyncEnvelope {
+            v: SYNC_FORMAT_VERSION,
+            updated_at: 100,
+            deleted: false,
+            data: Some(SyncPomodoroSession {
+                id: "p1".into(),
+                task_id: "missing-task".into(),
+                kind: "focus".into(),
+                planned_seconds: 1500,
+                started_at: 100,
+                ended_at: 200,
+                completed: true,
+                credit: 1.0,
+            }),
+        };
+        write_json(
+            &dir.join("sync/pomodoro_sessions/p1.json"),
+            &env,
+        )
+        .unwrap();
+        import_logical(&conn, &dir).expect("import must not fail on orphan pomodoro");
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pomodoro_sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
 }

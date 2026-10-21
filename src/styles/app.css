@@ -5203,6 +5203,79 @@ html.is-android .gantt-hover-card.is-pinned {
   white-space: nowrap;
 }
 
+.habit-note-indicator {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 0.75rem;
+  height: 0.75rem;
+  color: #2563eb;
+  pointer-events: none;
+}
+
+.habit-note-indicator svg {
+  width: 100%;
+  height: 100%;
+}
+
+.habit-note-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.habit-note-tooltip {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: min(22rem, calc(100vw - 1rem));
+  max-height: min(24rem, calc(100dvh - 1rem));
+  overflow: auto;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.habit-note-tooltip > span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.habit-note-tooltip p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.habit-note-tooltip .habit-note-empty {
+  color: var(--text-muted);
+}
+
+.habit-note-tooltip .habit-note-checked {
+  margin: 0;
+  padding-inline-start: 1.1rem;
+}
+
+.habit-note-tooltip .habit-note-checked li {
+  margin: 0.1rem 0;
+}
+
+.habit-mark > .habit-note-indicator {
+  position: absolute;
+  top: 0.15rem;
+  right: 0.1rem;
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
 .habit-glyph,
 .habit-mark {
   flex-shrink: 0;
@@ -5221,6 +5294,7 @@ html.is-android .gantt-hover-card.is-pinned {
 }
 
 .habit-mark {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;

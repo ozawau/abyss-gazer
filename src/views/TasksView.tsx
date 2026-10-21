@@ -793,7 +793,7 @@ export function TasksView({
     }
   }
 
-  async function handleAttachAsSubtask(parentId: string) {
+  async function handleAttachAsSubtask(parentId: string | null) {
     if (!attachAsChildTask || busy) return;
     setBusy(true);
     setError(null);
@@ -804,17 +804,19 @@ export function TasksView({
       });
       onTasksChange(rows);
       setAttachAsChildTask(null);
-      setExpandedIds((prev) => {
-        const next = new Set(prev);
-        const byId = taskById(rows);
-        next.add(parentId);
-        let current = byId.get(parentId);
-        while (current?.parent_id) {
-          next.add(current.parent_id);
-          current = byId.get(current.parent_id);
-        }
-        return next;
-      });
+      if (parentId) {
+        setExpandedIds((prev) => {
+          const next = new Set(prev);
+          const byId = taskById(rows);
+          next.add(parentId);
+          let current = byId.get(parentId);
+          while (current?.parent_id) {
+            next.add(current.parent_id);
+            current = byId.get(current.parent_id);
+          }
+          return next;
+        });
+      }
     } catch (err) {
       setError(String(err));
     } finally {
