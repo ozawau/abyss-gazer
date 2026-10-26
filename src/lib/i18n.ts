@@ -469,10 +469,14 @@ const zh = {
     createdVsCompleted: "每日任务产出",
     created: "新建",
     completed: "完成",
+    taskOutputSummary:
+      "新建：{created} · 完成：{completed} · 日均新建：{avgCreated} · 日均完成：{avgCompleted}",
     focusTrend: "每日专注",
     focusMinutes: "专注分钟",
     focusPomodoros: "番茄",
-    focusSummary: "专注分钟：{minutes} 分钟 · 番茄：{pomodoros}",
+    focusGoal: "每日目标 4 番茄",
+    focusSummary:
+      "专注分钟：{minutes} 分钟 · 番茄：{pomodoros} · 日均番茄：{avgPomodoros}",
     categoryBreakdown: "分类任务",
     open: "未完成",
     checkinBreakdown: "习惯完成率",
@@ -969,10 +973,14 @@ const en: Catalog<typeof zh> = {
     createdVsCompleted: "Daily task output",
     created: "Created",
     completed: "Completed",
+    taskOutputSummary:
+      "Created: {created} · Completed: {completed} · Avg created/day: {avgCreated} · Avg completed/day: {avgCompleted}",
     focusTrend: "Daily focus",
     focusMinutes: "Focus minutes",
     focusPomodoros: "Pomodoros",
-    focusSummary: "Focus minutes: {minutes} min · Pomodoros: {pomodoros}",
+    focusGoal: "Daily goal: 4 pomodoros",
+    focusSummary:
+      "Focus minutes: {minutes} min · Pomodoros: {pomodoros} · Avg pomodoros/day: {avgPomodoros}",
     categoryBreakdown: "Tasks by category",
     open: "Open",
     checkinBreakdown: "Habit completion",

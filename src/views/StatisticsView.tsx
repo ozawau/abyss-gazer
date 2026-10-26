@@ -15,10 +15,21 @@ import { descendantIds } from "../lib/taskTree";
 
 type RangeKey = "7d" | "30d" | "90d" | "all";
 
+const FOCUS_GOAL_POMODOROS = 4;
+const UNCATEGORIZED_COLOR = "#94a3b8";
+
 interface StatisticsViewProps {
   tasks: Task[];
   systemSettings: SystemSettings;
   dataEpoch: number;
+}
+
+interface FocusCategorySegment {
+  id: string;
+  name: string;
+  color: string;
+  minutes: number;
+  pomodoros: number;
 }
 
 interface DayPoint {
@@ -28,6 +39,7 @@ interface DayPoint {
   completed: number;
   focusMinutes: number;
   focusPomodoros: number;
+  focusByCategory: FocusCategorySegment[];
 }
 
 interface HabitStat {
@@ -45,6 +57,7 @@ interface BarTooltip {
   title: string;
   value: string;
   secondary?: string;
+  lines?: string[];
 }
 
 function rangeStart(key: RangeKey, today: Date, tasks: Task[]): Date {
@@ -66,6 +79,12 @@ function formatDay(date: Date, locale: string): string {
 function shortMinutes(minutes: number, t: (key: any, vars?: any) => string): string {
   if (minutes < 60) return `${Math.round(minutes)} ${t("statistics.minutes")}`;
   return `${(minutes / 60).toFixed(minutes >= 600 ? 0 : 1)} ${t("statistics.hours")}`;
+}
+
+function formatAverage(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return "0";
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 function ChartEmpty({ label }: { label: string }) {
@@ -167,6 +186,7 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
   }, [startMs, endMs, dataEpoch, start, today]);
 
   const categoryMap = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
+  const taskMap = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const visibleTasks = useMemo(
     () => tasks.filter((task) => categoryId === "all" || (categoryId === "none" ? !task.category_id : task.category_id === categoryId)),
     [tasks, categoryId],
@@ -208,21 +228,41 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
     const points: DayPoint[] = [];
     for (let cursor = start; cursor < end; cursor = addDays(cursor, 1)) {
       const key = dayKey(cursor);
+      const daySessions = visibleSessions.filter(
+        (session) => dayKey(new Date(session.started_at)) === key && session.kind === "focus" && session.completed,
+      );
+      const byCategory = new Map<string, FocusCategorySegment>();
+      for (const session of daySessions) {
+        const task = taskMap.get(session.task_id);
+        const category = task?.category_id ? categoryMap.get(task.category_id) : undefined;
+        const id = category?.id ?? "none";
+        const row = byCategory.get(id) ?? {
+          id,
+          name: category?.name ?? t("statistics.uncategorized"),
+          color: category?.color ?? UNCATEGORIZED_COLOR,
+          minutes: 0,
+          pomodoros: 0,
+        };
+        row.minutes += (session.planned_seconds * (session.credit ?? 1)) / 60;
+        row.pomodoros += 1;
+        byCategory.set(id, row);
+      }
+      const focusByCategory = [...byCategory.values()].sort((a, b) => b.minutes - a.minutes || a.name.localeCompare(b.name));
       points.push({
         key,
         label: formatDay(cursor, locale),
         created: visibleTasks.filter((task) => dayKey(new Date(task.created_at)) === key).length,
         completed: visibleTasks.filter((task) => task.completed_at != null && dayKey(new Date(task.completed_at)) === key).length,
-        focusMinutes: visibleSessions
-          .filter((session) => dayKey(new Date(session.started_at)) === key && session.kind === "focus" && session.completed)
-          .reduce((sum, session) => sum + (session.planned_seconds * (session.credit ?? 1)) / 60, 0),
+        focusMinutes: focusByCategory.reduce((sum, row) => sum + row.minutes, 0),
         focusPomodoros: completedFocusCountOnDay(visibleSessions, cursor),
+        focusByCategory,
       });
     }
     return points;
-  }, [end, locale, start, visibleSessions, visibleTasks]);
+  }, [categoryMap, end, locale, start, t, taskMap, visibleSessions, visibleTasks]);
 
   const summary = useMemo(() => {
+    const dayCount = Math.max(1, days.length);
     const created = visibleTasks.filter((task) => task.created_at >= startMs && task.created_at < endMs).length;
     const completed = visibleTasks.filter((task) => task.completed_at != null && task.completed_at >= startMs && task.completed_at < endMs).length;
     const open = visibleTasks.filter((task) => task.status !== "done").length;
@@ -243,8 +283,21 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
     const focusPomodoros = visibleSessions.filter(
       (session) => session.started_at >= startMs && session.started_at < endMs,
     ).length;
-    return { created, completed, open, focusMinutes, focusPomodoros, completionRate: created ? completed / created : 0, checked, applicable, checkinRate: applicable ? checked / applicable : 0 };
-  }, [autoCheckins, checkins, end, endMs, startMs, systemSettings.checkinCategoryId, today, visibleSessions, visibleTasks]);
+    return {
+      created,
+      completed,
+      open,
+      focusMinutes,
+      focusPomodoros,
+      avgCreated: created / dayCount,
+      avgCompleted: completed / dayCount,
+      avgPomodoros: focusPomodoros / dayCount,
+      completionRate: created ? completed / created : 0,
+      checked,
+      applicable,
+      checkinRate: applicable ? checked / applicable : 0,
+    };
+  }, [autoCheckins, checkins, days.length, end, endMs, startMs, systemSettings.checkinCategoryId, today, visibleSessions, visibleTasks]);
 
   const categoryStats = useMemo(() => {
     if (!categoriesLoaded) return [];
@@ -280,16 +333,25 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
     }).sort((a, b) => b.rate - a.rate || b.checked - a.checked);
   }, [autoCheckins, checkins, end, startMs, systemSettings.checkinCategoryId, tasks, today, visibleSessions, visibleTasks]);
 
+  const focusLegend = useMemo(() => {
+    const rows = new Map<string, { id: string; name: string; color: string; minutes: number }>();
+    for (const point of days) {
+      for (const segment of point.focusByCategory) {
+        const row = rows.get(segment.id) ?? { id: segment.id, name: segment.name, color: segment.color, minutes: 0 };
+        row.minutes += segment.minutes;
+        rows.set(segment.id, row);
+      }
+    }
+    return [...rows.values()].sort((a, b) => b.minutes - a.minutes || a.name.localeCompare(b.name));
+  }, [days]);
+
   const axisLabels = useMemo(() => days.map((point) => point.label), [days]);
   const taskAxis = useChartAxisLabels(days.length, axisLabels);
   const focusAxis = useChartAxisLabels(days.length, axisLabels);
   const maxTask = Math.max(1, ...days.flatMap((point) => [point.created, point.completed]));
-  const maxFocus = Math.max(1, ...days.map((point) => point.focusMinutes));
-  const focusLinePoints = days.map((point, index) => {
-    const x = days.length === 1 ? 50 : (index / (days.length - 1)) * 100;
-    const y = 92 - (point.focusMinutes / maxFocus) * 78;
-    return { ...point, x, y };
-  });
+  // Keep the daily 4-pomodoro goal visible even when recent days are below it.
+  const maxFocus = Math.max(FOCUS_GOAL_POMODOROS, 1, ...days.map((point) => point.focusPomodoros));
+  const goalLinePercent = (FOCUS_GOAL_POMODOROS / maxFocus) * 100;
 
   function showBarTooltip(next: BarTooltip) {
     setBarTooltip(next);
@@ -297,6 +359,21 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
 
   function hideBarTooltip() {
     setBarTooltip(null);
+  }
+
+  function focusTooltip(point: DayPoint): BarTooltip {
+    return {
+      chart: "focus",
+      key: point.key,
+      label: point.label,
+      title: t("statistics.focusPomodoros"),
+      value: String(point.focusPomodoros),
+      secondary: `${t("statistics.focusMinutes")}: ${Math.round(point.focusMinutes)} ${t("statistics.minutes")}`,
+      lines: point.focusByCategory.map(
+        (segment) =>
+          `${segment.name}: ${Math.round(segment.minutes)} ${t("statistics.minutes")} · ${segment.pomodoros} ${t("statistics.focusPomodoros")}`,
+      ),
+    };
   }
 
   return (
@@ -329,29 +406,176 @@ export function StatisticsView({ tasks, systemSettings, dataEpoch }: StatisticsV
         <div><span>{t("statistics.checkinRate")}</span><strong>{summary.applicable ? `${Math.round(summary.checkinRate * 100)}%` : "—"}</strong></div>
       </section>
       <div className="statistics-grid">
-        <section className="statistics-panel statistics-panel-wide"><h2>{t("statistics.createdVsCompleted")}</h2><div ref={taskAxis.ref} className="statistics-chart statistics-bars" role="img" aria-label={t("statistics.createdVsCompleted")}>
-          {days.map((point, index) => <div className="statistics-day" key={point.key}><div className="statistics-bar-pair">
-            <span className="statistics-bar-hit" role="img" tabIndex={0} aria-label={`${point.label} ${t("statistics.created")}: ${point.created}`} onPointerEnter={() => showBarTooltip({ chart: "tasks", key: `${point.key}-created`, label: point.label, title: t("statistics.created"), value: String(point.created), secondary: `${t("statistics.completed")}: ${point.completed}` })} onPointerLeave={hideBarTooltip} onFocus={() => setBarTooltip({ chart: "tasks", key: `${point.key}-created`, label: point.label, title: t("statistics.created"), value: String(point.created), secondary: `${t("statistics.completed")}: ${point.completed}` })} onBlur={hideBarTooltip}><i className="bar-created" style={{ height: `${(point.created / maxTask) * 100}%` }} /></span>
-            <span className="statistics-bar-hit" role="img" tabIndex={0} aria-label={`${point.label} ${t("statistics.completed")}: ${point.completed}`} onPointerEnter={() => showBarTooltip({ chart: "tasks", key: `${point.key}-completed`, label: point.label, title: t("statistics.completed"), value: String(point.completed), secondary: `${t("statistics.created")}: ${point.created}` })} onPointerLeave={hideBarTooltip} onFocus={() => setBarTooltip({ chart: "tasks", key: `${point.key}-completed`, label: point.label, title: t("statistics.completed"), value: String(point.completed), secondary: `${t("statistics.created")}: ${point.created}` })} onBlur={hideBarTooltip}><i className="bar-completed" style={{ height: `${(point.completed / maxTask) * 100}%` }} /></span>
-          </div><small style={{ visibility: taskAxis.visible.has(index) ? "visible" : "hidden" }}>{point.label}</small></div>)}
-          {barTooltip?.chart === "tasks" && <div className="statistics-chart-tooltip" role="status"><strong>{barTooltip.label}</strong><span>{barTooltip.title}: {barTooltip.value}</span><span>{barTooltip.secondary}</span></div>}
-        </div><div className="statistics-legend"><span><i className="legend-created" />{t("statistics.created")}</span><span><i className="legend-completed" />{t("statistics.completed")}</span></div></section>
-        <section className="statistics-panel statistics-panel-wide"><h2>{t("statistics.focusTrend")}</h2><div ref={focusAxis.ref} className="statistics-chart statistics-line-chart" role="img" aria-label={t("statistics.focusTrend")}>
-          <svg className="statistics-line-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <line className="statistics-line-axis" x1="0" y1="92" x2="100" y2="92" />
-            <polyline className="statistics-line-path" points={focusLinePoints.map((point) => `${point.x},${point.y}`).join(" ")} />
-          </svg>
-          <div className="statistics-line-points" aria-hidden="true">
-            {focusLinePoints.map((point) => <span className="statistics-line-point" key={point.key} style={{ left: `${point.x}%`, top: `${point.y}%` }} />)}
+        <section className="statistics-panel statistics-panel-wide">
+          <h2>{t("statistics.createdVsCompleted")}</h2>
+          <div ref={taskAxis.ref} className="statistics-chart statistics-bars" role="img" aria-label={t("statistics.createdVsCompleted")}>
+            {days.map((point, index) => (
+              <div className="statistics-day" key={point.key}>
+                <div className="statistics-bar-pair">
+                  <span
+                    className="statistics-bar-hit"
+                    role="img"
+                    tabIndex={0}
+                    aria-label={`${point.label} ${t("statistics.created")}: ${point.created}`}
+                    onPointerEnter={() => showBarTooltip({ chart: "tasks", key: `${point.key}-created`, label: point.label, title: t("statistics.created"), value: String(point.created), secondary: `${t("statistics.completed")}: ${point.completed}` })}
+                    onPointerLeave={hideBarTooltip}
+                    onFocus={() => setBarTooltip({ chart: "tasks", key: `${point.key}-created`, label: point.label, title: t("statistics.created"), value: String(point.created), secondary: `${t("statistics.completed")}: ${point.completed}` })}
+                    onBlur={hideBarTooltip}
+                  >
+                    <i className="bar-created" style={{ height: `${(point.created / maxTask) * 100}%` }} />
+                  </span>
+                  <span
+                    className="statistics-bar-hit"
+                    role="img"
+                    tabIndex={0}
+                    aria-label={`${point.label} ${t("statistics.completed")}: ${point.completed}`}
+                    onPointerEnter={() => showBarTooltip({ chart: "tasks", key: `${point.key}-completed`, label: point.label, title: t("statistics.completed"), value: String(point.completed), secondary: `${t("statistics.created")}: ${point.created}` })}
+                    onPointerLeave={hideBarTooltip}
+                    onFocus={() => setBarTooltip({ chart: "tasks", key: `${point.key}-completed`, label: point.label, title: t("statistics.completed"), value: String(point.completed), secondary: `${t("statistics.created")}: ${point.created}` })}
+                    onBlur={hideBarTooltip}
+                  >
+                    <i className="bar-completed" style={{ height: `${(point.completed / maxTask) * 100}%` }} />
+                  </span>
+                </div>
+                <small style={{ visibility: taskAxis.visible.has(index) ? "visible" : "hidden" }}>{point.label}</small>
+              </div>
+            ))}
+            {barTooltip?.chart === "tasks" && (
+              <div className="statistics-chart-tooltip" role="status">
+                <strong>{barTooltip.label}</strong>
+                <span>{barTooltip.title}: {barTooltip.value}</span>
+                <span>{barTooltip.secondary}</span>
+              </div>
+            )}
           </div>
-          <div className="statistics-line-hit-layer">
-            {days.map((point) => <span className="statistics-line-hit" key={point.key} role="img" tabIndex={0} aria-label={`${point.label} ${t("statistics.focusMinutes")}: ${Math.round(point.focusMinutes)}`} onPointerEnter={() => showBarTooltip({ chart: "focus", key: point.key, label: point.label, title: t("statistics.focusMinutes"), value: `${Math.round(point.focusMinutes)} ${t("statistics.minutes")}`, secondary: `${t("statistics.focusPomodoros")}: ${point.focusPomodoros}` })} onPointerLeave={hideBarTooltip} onFocus={() => setBarTooltip({ chart: "focus", key: point.key, label: point.label, title: t("statistics.focusMinutes"), value: `${Math.round(point.focusMinutes)} ${t("statistics.minutes")}`, secondary: `${t("statistics.focusPomodoros")}: ${point.focusPomodoros}` })} onBlur={hideBarTooltip} />)}
+          <div className="statistics-legend">
+            <span><i className="legend-created" />{t("statistics.created")}</span>
+            <span><i className="legend-completed" />{t("statistics.completed")}</span>
           </div>
-          <div className="statistics-line-labels" aria-hidden="true">{days.map((point, index) => <small key={point.key} style={{ visibility: focusAxis.visible.has(index) ? "visible" : "hidden" }}>{point.label}</small>)}</div>
-          {barTooltip?.chart === "focus" && <div className="statistics-chart-tooltip" role="status"><strong>{barTooltip.label}</strong><span>{barTooltip.title}: {barTooltip.value}</span><span>{barTooltip.secondary}</span></div>}
-        </div><p className="statistics-chart-note">{t("statistics.focusSummary", { minutes: Math.round(summary.focusMinutes), pomodoros: summary.focusPomodoros })}</p></section>
-        <section className="statistics-panel"><h2>{t("statistics.categoryBreakdown")}</h2>{categoryStats.length === 0 ? <ChartEmpty label={t("statistics.noData")} /> : <div className="statistics-category-list">{categoryStats.map((row) => { const total = row.done + row.open; return <div className="statistics-category-row" key={row.name}><div className="statistics-row-label"><span>{row.name}</span><small>{total}</small></div><div className="statistics-stack"><i className="stack-done" style={{ width: `${(row.done / total) * 100}%` }} /><i className="stack-open" style={{ width: `${(row.open / total) * 100}%` }} /></div><small>{row.done}/{total}</small></div>; })}</div>}<div className="statistics-legend"><span><i className="legend-completed" />{t("statistics.completed")}</span><span><i className="legend-open" />{t("statistics.open")}</span></div></section>
-        <section className="statistics-panel"><h2>{t("statistics.checkinBreakdown")}</h2>{habitStats.length === 0 ? <ChartEmpty label={t("statistics.noData")} /> : <div className="statistics-habit-list">{habitStats.map((habit) => <div className="statistics-habit-row" key={habit.id}><div className="statistics-row-label"><span>{habit.title}</span><small>{habit.checked}/{habit.applicable}</small></div><div className="statistics-progress"><i style={{ width: `${habit.rate * 100}%` }} /></div><strong>{Math.round(habit.rate * 100)}%</strong></div>)}</div>}</section>
+          <p className="statistics-chart-note">
+            {t("statistics.taskOutputSummary", {
+              created: summary.created,
+              completed: summary.completed,
+              avgCreated: formatAverage(summary.avgCreated),
+              avgCompleted: formatAverage(summary.avgCompleted),
+            })}
+          </p>
+        </section>
+        <section className="statistics-panel statistics-panel-wide">
+          <h2>{t("statistics.focusTrend")}</h2>
+          <div
+            ref={focusAxis.ref}
+            className="statistics-chart statistics-bars statistics-focus-bars"
+            role="img"
+            aria-label={t("statistics.focusTrend")}
+            style={{ ["--goal-ratio" as string]: String(goalLinePercent / 100) }}
+          >
+            <div className="statistics-goal-line" title={t("statistics.focusGoal")}>
+              <span>{FOCUS_GOAL_POMODOROS}</span>
+            </div>
+            {days.map((point, index) => {
+              const tip = focusTooltip(point);
+              // Bar height tracks pomodoros so the y=4 goal line stays meaningful;
+              // segments inside the bar are sized by focus minutes (时长) per category.
+              const barHeight = `${(point.focusPomodoros / maxFocus) * 100}%`;
+              return (
+                <div className="statistics-day" key={point.key}>
+                  <div className="statistics-bar-single">
+                    <span
+                      className="statistics-bar-hit statistics-stack-bar"
+                      role="img"
+                      tabIndex={0}
+                      aria-label={`${point.label} ${t("statistics.focusPomodoros")}: ${point.focusPomodoros}`}
+                      style={{ height: point.focusPomodoros > 0 ? barHeight : 0 }}
+                      onPointerEnter={() => showBarTooltip(tip)}
+                      onPointerLeave={hideBarTooltip}
+                      onFocus={() => setBarTooltip(tip)}
+                      onBlur={hideBarTooltip}
+                    >
+                      {point.focusByCategory.map((segment) => (
+                        <i
+                          key={segment.id}
+                          style={{
+                            flexGrow: Math.max(segment.minutes, 0.01),
+                            background: segment.color,
+                          }}
+                          title={segment.name}
+                        />
+                      ))}
+                    </span>
+                  </div>
+                  <small style={{ visibility: focusAxis.visible.has(index) ? "visible" : "hidden" }}>{point.label}</small>
+                </div>
+              );
+            })}
+            {barTooltip?.chart === "focus" && (
+              <div className="statistics-chart-tooltip" role="status">
+                <strong>{barTooltip.label}</strong>
+                <span>{barTooltip.title}: {barTooltip.value}</span>
+                <span>{barTooltip.secondary}</span>
+                {barTooltip.lines?.map((line) => <span key={line}>{line}</span>)}
+              </div>
+            )}
+          </div>
+          {focusLegend.length > 0 && (
+            <div className="statistics-legend">
+              {focusLegend.map((row) => (
+                <span key={row.id}><i style={{ background: row.color }} />{row.name}</span>
+              ))}
+              <span><i className="legend-focus-goal" />{t("statistics.focusGoal")}</span>
+            </div>
+          )}
+          {focusLegend.length === 0 && (
+            <div className="statistics-legend">
+              <span><i className="legend-focus-goal" />{t("statistics.focusGoal")}</span>
+            </div>
+          )}
+          <p className="statistics-chart-note">
+            {t("statistics.focusSummary", {
+              minutes: Math.round(summary.focusMinutes),
+              pomodoros: summary.focusPomodoros,
+              avgPomodoros: formatAverage(summary.avgPomodoros),
+            })}
+          </p>
+        </section>
+        <section className="statistics-panel">
+          <h2>{t("statistics.categoryBreakdown")}</h2>
+          {categoryStats.length === 0 ? <ChartEmpty label={t("statistics.noData")} /> : (
+            <div className="statistics-category-list">
+              {categoryStats.map((row) => {
+                const total = row.done + row.open;
+                return (
+                  <div className="statistics-category-row" key={row.name}>
+                    <div className="statistics-row-label"><span>{row.name}</span><small>{total}</small></div>
+                    <div className="statistics-stack">
+                      <i className="stack-done" style={{ width: `${(row.done / total) * 100}%` }} />
+                      <i className="stack-open" style={{ width: `${(row.open / total) * 100}%` }} />
+                    </div>
+                    <small>{row.done}/{total}</small>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="statistics-legend">
+            <span><i className="legend-completed" />{t("statistics.completed")}</span>
+            <span><i className="legend-open" />{t("statistics.open")}</span>
+          </div>
+        </section>
+        <section className="statistics-panel">
+          <h2>{t("statistics.checkinBreakdown")}</h2>
+          {habitStats.length === 0 ? <ChartEmpty label={t("statistics.noData")} /> : (
+            <div className="statistics-habit-list">
+              {habitStats.map((habit) => (
+                <div className="statistics-habit-row" key={habit.id}>
+                  <div className="statistics-row-label"><span>{habit.title}</span><small>{habit.checked}/{habit.applicable}</small></div>
+                  <div className="statistics-progress"><i style={{ width: `${habit.rate * 100}%` }} /></div>
+                  <strong>{Math.round(habit.rate * 100)}%</strong>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );
