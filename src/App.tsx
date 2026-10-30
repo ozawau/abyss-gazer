@@ -9,6 +9,7 @@ import {
   DEFAULT_SYSTEM_SETTINGS,
   getPomodoroSettings,
   getSystemSettings,
+  isTaskDeleted,
   listTasks,
   PomodoroSettings,
   reopenDatabase,
@@ -124,6 +125,8 @@ function MainApp() {
   const [upcomingCategoryFilter, setUpcomingCategoryFilter] =
     useState<CategoryFilter>("all");
   const [completedCategoryFilter, setCompletedCategoryFilter] =
+    useState<CategoryFilter>("all");
+  const [deletedCategoryFilter, setDeletedCategoryFilter] =
     useState<CategoryFilter>("all");
   const [templatesCategoryFilter, setTemplatesCategoryFilter] =
     useState<CategoryFilter>("all");
@@ -328,10 +331,11 @@ function MainApp() {
     [tasks, selectedTaskId],
   );
 
-  const pomodoroTask = useMemo(
-    () => tasks.find((t) => t.id === pomodoroTaskId) ?? null,
-    [tasks, pomodoroTaskId],
-  );
+  const pomodoroTask = useMemo(() => {
+    const task = tasks.find((t) => t.id === pomodoroTaskId) ?? null;
+    if (!task || isTaskDeleted(task)) return null;
+    return task;
+  }, [tasks, pomodoroTaskId]);
   const tasksById = useMemo(() => taskById(tasks), [tasks]);
   const currentTaskTitle = useMemo(() => {
     const task = pomodoroTask ?? selectedTask;
@@ -590,6 +594,22 @@ function MainApp() {
               onOpenTemplate={openRecurrenceTemplate}
               categoryFilter={completedCategoryFilter}
               onCategoryFilterChange={setCompletedCategoryFilter}
+              dataEpoch={dataEpoch}
+              checkinCategoryId={systemSettings.checkinCategoryId}
+            />
+          </ViewSlot>
+        )}
+        {mountedTaskPages.has("deleted") && (
+          <ViewSlot
+            active={activeView === "tasks" && tasksSubPage === "deleted"}
+          >
+            <CompletedTasksView
+              list="deleted"
+              tasks={tasks}
+              onTasksChange={setTasks}
+              onOpenTemplate={openRecurrenceTemplate}
+              categoryFilter={deletedCategoryFilter}
+              onCategoryFilterChange={setDeletedCategoryFilter}
               dataEpoch={dataEpoch}
               checkinCategoryId={systemSettings.checkinCategoryId}
             />

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getSystemSettings, listPomodoroSessionsInRange, listTasks } from "../lib/api";
+import { getSystemSettings, isTaskDeleted, listPomodoroSessionsInRange, listTasks } from "../lib/api";
 import { initCnHolidayData, useCnHolidayRevision } from "../lib/cnHolidayData";
 import { statutoryDayInfo, statutoryDayTitle } from "../lib/cnStatutoryDay";
 import { formatLunarDate, formatLunarDayShort } from "../lib/dateDisplay";
@@ -106,7 +106,7 @@ export function TrayCalendar() {
     Promise.all([listTasks(), listPomodoroSessionsInRange(startMs, endMs)])
       .then(([tasks, sessions]) => {
         if (cancelled) return;
-        const leaves = leafTasks(tasks);
+        const leaves = leafTasks(tasks.filter((task) => !isTaskDeleted(task)));
         const leafIds = new Set(leaves.map((task) => task.id));
         const visibleSessions = sessions.filter((session) => leafIds.has(session.task_id));
         const marked = new Set<string>();

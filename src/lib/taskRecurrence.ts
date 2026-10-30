@@ -1,6 +1,5 @@
 import solarLunar from "solarlunar";
-import type { Task } from "./api";
-import { spawnRecurringTasks } from "./api";
+import { isTaskDeleted, spawnRecurringTasks, type Task } from "./api";
 import { addDays, dayKey, startOfLocalDay } from "./calendar";
 import { statutoryDayInfo } from "./cnStatutoryDay";
 import { WEEKDAY_FULL, type AppLocale, type MessageKey } from "./i18n";
@@ -473,6 +472,7 @@ export function calendarPlansOnDay(
         .map((task) => task.recurrence_source_id as string),
     );
     for (const task of tasks) {
+      if (isTaskDeleted(task)) continue;
       const rule = parseTaskRecurrence(task.recurrence);
       if (!rule || taken.has(task.id)) continue;
       const since = parseDayKey(rule.since);
@@ -485,7 +485,7 @@ export function calendarPlansOnDay(
 
   const nowMs = now.getTime();
   for (const task of tasks) {
-    if (seen.has(task.id) || isInTemplateTree(task, byId)) continue;
+    if (isTaskDeleted(task) || seen.has(task.id) || isInTemplateTree(task, byId)) continue;
     if (!isTaskUpcoming(task, nowMs) || task.start_at == null) continue;
     if (dayKey(startOfLocalDay(new Date(task.start_at))) !== occurrence) continue;
     seen.add(task.id);
@@ -508,6 +508,7 @@ export async function materializeRecurringTasks(
   const floor = startOfLocalDay(addDays(end, -LOOKBACK_DAYS));
   const items: { template_id: string; occurrence: string; start_at: number }[] = [];
   for (const task of tasks) {
+    if (isTaskDeleted(task)) continue;
     const rule = parseTaskRecurrence(task.recurrence);
     if (!rule) continue;
     const since = parseDayKey(rule.since);

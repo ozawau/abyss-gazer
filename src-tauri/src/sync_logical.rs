@@ -90,6 +90,8 @@ pub struct SyncTask {
     pub recurrence_occurrence: FieldUpdate<String>,
     #[serde(default)]
     pub checkin_weekdays: FieldUpdate<String>,
+    #[serde(default)]
+    pub deleted_at: FieldUpdate<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -332,14 +334,15 @@ fn local_task_extensions(
         Option<String>,
         Option<String>,
         Option<String>,
+        Option<i64>,
     )>,
     String,
 > {
     conn.query_row(
-        "SELECT recurrence, recurrence_source_id, recurrence_occurrence, checkin_weekdays
+        "SELECT recurrence, recurrence_source_id, recurrence_occurrence, checkin_weekdays, deleted_at
          FROM tasks WHERE id = ?1",
         [id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
     )
     .optional()
     .map_err(|e| e.to_string())
@@ -366,11 +369,12 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
         return Ok(());
     }
     let remote_wins = local_ts.map(|ts| remote_ts > ts).unwrap_or(true);
-    let local_ext = local_task_extensions(conn, &t.id)?.unwrap_or((None, None, None, None));
+    let local_ext = local_task_extensions(conn, &t.id)?.unwrap_or((None, None, None, None, None));
     let recurrence = t.recurrence.merge(local_ext.0, remote_wins);
     let recurrence_source_id = t.recurrence_source_id.merge(local_ext.1, remote_wins);
     let recurrence_occurrence = t.recurrence_occurrence.merge(local_ext.2, remote_wins);
     let checkin_weekdays = t.checkin_weekdays.merge(local_ext.3, remote_wins);
+    let deleted_at = t.deleted_at.merge(local_ext.4, remote_wins);
     if !remote_wins {
         // Same timestamp: only fill extension fields that local is still missing.
         conn.execute(
@@ -378,13 +382,15 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
              recurrence = COALESCE(recurrence, ?1),
              recurrence_source_id = COALESCE(recurrence_source_id, ?2),
              recurrence_occurrence = COALESCE(recurrence_occurrence, ?3),
-             checkin_weekdays = COALESCE(checkin_weekdays, ?4)
-             WHERE id = ?5",
+             checkin_weekdays = COALESCE(checkin_weekdays, ?4),
+             deleted_at = ?5
+             WHERE id = ?6",
             rusqlite::params![
                 recurrence,
                 recurrence_source_id,
                 recurrence_occurrence,
                 checkin_weekdays,
+                deleted_at,
                 t.id
             ],
         )
@@ -395,8 +401,8 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
     conn.execute(
         "INSERT INTO tasks (id, title, notes, status, priority, sort_order, parent_id, category_id,
          estimate_pomodoros, due_at, start_at, completed_at, created_at, updated_at,
-         recurrence, recurrence_source_id, recurrence_occurrence, checkin_weekdays)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+         recurrence, recurrence_source_id, recurrence_occurrence, checkin_weekdays, deleted_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
          ON CONFLICT(id) DO UPDATE SET
          title=excluded.title, notes=excluded.notes, status=excluded.status, priority=excluded.priority,
          sort_order=excluded.sort_order, parent_id=excluded.parent_id, category_id=excluded.category_id,
@@ -404,7 +410,7 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
          completed_at=excluded.completed_at, created_at=excluded.created_at, updated_at=excluded.updated_at,
          recurrence=excluded.recurrence, recurrence_source_id=excluded.recurrence_source_id,
          recurrence_occurrence=excluded.recurrence_occurrence,
-         checkin_weekdays=excluded.checkin_weekdays",
+         checkin_weekdays=excluded.checkin_weekdays, deleted_at=excluded.deleted_at",
         rusqlite::params![
             t.id,
             t.title,
@@ -424,6 +430,7 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
             recurrence_source_id,
             recurrence_occurrence,
             checkin_weekdays,
+            deleted_at,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -474,7 +481,7 @@ fn export_tasks(conn: &Connection, root: &Path) -> Result<(), String> {
         .prepare(
             "SELECT id, title, notes, status, priority, sort_order, parent_id, category_id,
              estimate_pomodoros, due_at, start_at, completed_at, created_at, updated_at,
-             recurrence, recurrence_source_id, recurrence_occurrence, checkin_weekdays FROM tasks",
+             recurrence, recurrence_source_id, recurrence_occurrence, checkin_weekdays, deleted_at FROM tasks",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -498,6 +505,7 @@ fn export_tasks(conn: &Connection, root: &Path) -> Result<(), String> {
                 recurrence_source_id: FieldUpdate::from_local(row.get(15)?),
                 recurrence_occurrence: FieldUpdate::from_local(row.get(16)?),
                 checkin_weekdays: FieldUpdate::from_local(row.get(17)?),
+                deleted_at: FieldUpdate::from_local(row.get(18)?),
             })
         })
         .map_err(|e| e.to_string())?;

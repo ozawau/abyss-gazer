@@ -79,9 +79,9 @@ const zh = {
     taskName: "任务名称",
     createdAt: "创建 {time}",
     deleteTask: "删除任务",
-    deleteTaskBody: "确定删除任务「{title}」？此操作不可撤销。",
+    deleteTaskBody: "确定删除任务「{title}」？任务会移到「已删除」。",
     deleteTaskWithChildren:
-      "确定删除任务「{title}」及其所有子任务？此操作不可撤销。",
+      "确定删除任务「{title}」及其所有子任务？这些任务会移到「已删除」。",
     noCategory: "无分类",
     markDone: "标记为完成",
     markTodo: "标记为未完成",
@@ -122,6 +122,7 @@ const zh = {
     current: "当前任务",
     upcoming: "未开始",
     completed: "已完成",
+    deleted: "已删除",
     templates: "模板任务",
   },
   phase: {
@@ -323,6 +324,21 @@ const zh = {
     empty: "没有符合条件的已完成任务。",
     finished: "完成 {time}",
     restore: "恢复",
+  },
+  deleted: {
+    title: "已删除任务",
+    hint: "按删除时间由新到旧排列，可筛选后翻页浏览。指定父任务后，列出它下面全部已删除的子任务。",
+    parentMatch: "{count} 个已删除子任务",
+    deletedDate: "删除日期",
+    deletedFrom: "删除日期起",
+    deletedTo: "删除日期止",
+    empty: "没有符合条件的已删除任务。",
+    removed: "删除 {time}",
+    purge: "彻底删除",
+    purgeTask: "彻底删除任务",
+    purgeTaskBody: "确定彻底删除任务「{title}」？此操作不可撤销。",
+    purgeTaskWithChildren:
+      "确定彻底删除任务「{title}」及其所有子任务？此操作不可撤销。",
   },
   detail: {
     title: "编辑任务",
@@ -583,9 +599,9 @@ const en: Catalog<typeof zh> = {
     taskName: "Task name",
     createdAt: "Created {time}",
     deleteTask: "Delete task",
-    deleteTaskBody: "Delete “{title}”? This cannot be undone.",
+    deleteTaskBody: "Delete “{title}”? It moves to Deleted.",
     deleteTaskWithChildren:
-      "Delete “{title}” and all of its subtasks? This cannot be undone.",
+      "Delete “{title}” and all of its subtasks? They move to Deleted.",
     noCategory: "No category",
     markDone: "Mark complete",
     markTodo: "Mark incomplete",
@@ -626,6 +642,7 @@ const en: Catalog<typeof zh> = {
     current: "Current",
     upcoming: "Not started",
     completed: "Completed",
+    deleted: "Deleted",
     templates: "Templates",
   },
   phase: {
@@ -827,6 +844,21 @@ const en: Catalog<typeof zh> = {
     empty: "No matching completed tasks.",
     finished: "Completed {time}",
     restore: "Restore",
+  },
+  deleted: {
+    title: "Deleted tasks",
+    hint: "Newest deletions first. Filter and page through the list. Choose a parent to list every deleted subtask under it.",
+    parentMatch: "{count} deleted subtasks",
+    deletedDate: "Deleted",
+    deletedFrom: "Deleted from",
+    deletedTo: "Deleted to",
+    empty: "No matching deleted tasks.",
+    removed: "Deleted {time}",
+    purge: "Delete permanently",
+    purgeTask: "Delete permanently",
+    purgeTaskBody: "Permanently delete “{title}”? This cannot be undone.",
+    purgeTaskWithChildren:
+      "Permanently delete “{title}” and all of its subtasks? This cannot be undone.",
   },
   detail: {
     title: "Edit task",

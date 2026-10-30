@@ -55,6 +55,7 @@ pub fn open_db(path: &Path) -> SqliteResult<Connection> {
             recurrence_source_id TEXT,
             recurrence_occurrence TEXT,
             checkin_weekdays TEXT,
+            deleted_at INTEGER,
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
         );
 
@@ -234,6 +235,9 @@ fn migrate_schema(conn: &Connection) -> SqliteResult<()> {
     }
     if !cols.iter().any(|c| c == "checkin_weekdays") {
         conn.execute("ALTER TABLE tasks ADD COLUMN checkin_weekdays TEXT", [])?;
+    }
+    if !cols.iter().any(|c| c == "deleted_at") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN deleted_at INTEGER", [])?;
     }
     conn.execute_batch(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_recurrence_instance

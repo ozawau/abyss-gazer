@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Category, Task } from "../lib/api";
+import { isTaskDeleted, type Category, type Task } from "../lib/api";
 import { useDismissOnAndroidBack } from "../lib/androidBack";
 import {
   descendantIds,
@@ -94,7 +94,7 @@ export function ReparentTaskDialog({
   }, [open, task?.id]);
 
   const openTasks = useMemo(
-    () => tasks.filter((row) => row.status !== "done"),
+    () => tasks.filter((row) => row.status !== "done" && !isTaskDeleted(row)),
     [tasks],
   );
 

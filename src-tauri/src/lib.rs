@@ -51,6 +51,8 @@ pub fn run() {
             commands::tasks::reparent_task,
             commands::tasks::reorder_task,
             commands::tasks::delete_task,
+            commands::tasks::restore_task,
+            commands::tasks::purge_task,
             commands::tasks::get_task,
             commands::tasks::spawn_recurring_tasks,
             commands::categories::list_categories,

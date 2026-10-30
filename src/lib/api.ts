@@ -38,6 +38,11 @@ export interface Task {
   recurrence_source_id: string | null;
   recurrence_occurrence: string | null;
   checkin_weekdays: string | null;
+  deleted_at: number | null;
+}
+
+export function isTaskDeleted(task: Task): boolean {
+  return task.deleted_at != null;
 }
 
 export interface PomodoroSession {
@@ -139,8 +144,16 @@ export function reorderTask(input: {
   );
 }
 
-export function deleteTask(id: string): Promise<void> {
+export function deleteTask(id: string): Promise<Task[]> {
   return afterLocalMutation(invoke("delete_task", { id }));
+}
+
+export function restoreTask(id: string): Promise<Task[]> {
+  return afterLocalMutation(invoke("restore_task", { id }));
+}
+
+export function purgeTask(id: string): Promise<Task[]> {
+  return afterLocalMutation(invoke("purge_task", { id }));
 }
 
 export function getTask(id: string): Promise<Task> {

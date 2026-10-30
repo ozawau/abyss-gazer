@@ -32,6 +32,7 @@ import {
   createTask,
   deleteCategory,
   deleteTask,
+  isTaskDeleted,
   listCategories,
   listFocusCountsSince,
   listTasks,
@@ -69,7 +70,6 @@ import {
   ancestorTasks,
   childIdSet,
   flattenTaskTree,
-  removeTaskTree,
   taskById,
   withAncestors,
   type TaskNode,
@@ -424,7 +424,9 @@ export function TasksView({
   const scopedTasks = useMemo(
     () =>
       tasks.filter(
-        (task) => isInTemplateTree(task, tasksById) === (mode === "templates"),
+        (task) =>
+          !isTaskDeleted(task) &&
+          isInTemplateTree(task, tasksById) === (mode === "templates"),
       ),
     [tasks, tasksById, mode],
   );
@@ -779,10 +781,12 @@ export function TasksView({
     setBusy(true);
     setError(null);
     try {
-      await deleteTask(task.id);
-      const next = removeTaskTree(tasks, task.id);
+      const next = await deleteTask(task.id);
       onTasksChange(next);
-      if (selectedTaskId && !next.some((row) => row.id === selectedTaskId)) {
+      if (
+        selectedTaskId &&
+        !next.some((row) => row.id === selectedTaskId && !isTaskDeleted(row))
+      ) {
         onSelectTask(null);
       }
       setPendingDeleteTask(null);

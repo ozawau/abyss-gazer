@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   Category,
+  isTaskDeleted,
   listCategories,
   listFirstCompletedFocusStarts,
   listLastCompletedFocusEnds,
@@ -73,7 +74,7 @@ const SCALE_TABS: { id: GanttScale }[] = [
 ];
 
 export function GanttView({
-  tasks,
+  tasks: allTasks,
   selectedTaskId,
   onSelectTask,
   onStartPomodoro,
@@ -84,6 +85,10 @@ export function GanttView({
   onCategoryFilterChange,
   dataEpoch,
 }: GanttViewProps) {
+  const tasks = useMemo(
+    () => allTasks.filter((task) => !isTaskDeleted(task)),
+    [allTasks],
+  );
   const { locale, t } = useI18n();
   const android = isAndroidDevice();
   const narrow = useNarrowViewport();

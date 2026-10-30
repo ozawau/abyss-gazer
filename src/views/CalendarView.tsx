@@ -16,6 +16,7 @@ import {
 } from "../lib/androidBack";
 import {
   Category,
+  isTaskDeleted,
   listCategories,
   listPomodoroSessionsInRange,
   PomodoroSession,
@@ -92,7 +93,7 @@ interface WeekFocusDetail {
 }
 
 export function CalendarView({
-  tasks,
+  tasks: allTasks,
   selectedTaskId,
   onSelectTask,
   onStartPomodoro,
@@ -101,6 +102,10 @@ export function CalendarView({
   onCategoryFilterChange,
   dataEpoch,
 }: CalendarViewProps) {
+  const tasks = useMemo(
+    () => allTasks.filter((task) => !isTaskDeleted(task)),
+    [allTasks],
+  );
   const { locale, t } = useI18n();
   useCnHolidayRevision();
   const viewRef = useRef<HTMLDivElement>(null);

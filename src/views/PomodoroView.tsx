@@ -567,86 +567,64 @@ export function PomodoroView({
     if (!task) return;
 
     void (async () => {
-    const outgoingId = sessionTaskIdRef.current;
-    if (
-      outgoingId &&
-      outgoingId !== task.id &&
-      phaseRef.current === "focus" &&
-      startedAtRef.current != null
-    ) {
-      await creditElapsedFocus(outgoingId);
-    }
+      const taskId = task.id;
+      const focusLive =
+        phaseRef.current === "focus" &&
+        startedAtRef.current != null &&
+        (statusRef.current === "running" || statusRef.current === "paused");
 
-    const breakUnderway =
-      isBreakPhase(phaseRef.current) &&
-      (statusRef.current === "running" || statusRef.current === "paused");
-    if (breakUnderway) {
-      void (async () => {
-        setError(null);
-        finishingRef.current = true;
-        setStatus("idle");
-        if (startedAtRef.current != null) {
-          await persistSession(false);
+      if (focusLive) {
+        const outgoingId = sessionTaskIdRef.current;
+        if (outgoingId && outgoingId !== taskId) {
+          await creditElapsedFocus(outgoingId);
+          if (statusRef.current === "running") {
+            startedAtRef.current = Date.now();
+            bindSessionTask(taskId);
+          } else {
+            bindSessionTask(taskId, false);
+          }
+        } else {
+          bindSessionTask(taskId, false);
         }
-        creditedTenthsRef.current = 0;
-        const now = Date.now();
-        startedAtRef.current = now;
-        bindSessionTask(task.id);
-        phaseRef.current = "focus";
-        setPhase("focus");
-        const next = plannedFor("focus", settingsRef.current);
-        plannedRef.current = next;
-        setRemaining(next);
-        finishingRef.current = false;
-        setStatus("running");
-      })();
-      return;
-    }
-
-    const continuingFocus =
-      phaseRef.current === "focus" && statusRef.current === "running";
-
-    if (continuingFocus) {
-      if (
-        sessionTaskIdRef.current &&
-        sessionTaskIdRef.current !== task.id &&
-        startedAtRef.current != null
-      ) {
-        const previousId = sessionTaskIdRef.current;
-        await creditElapsedFocus(previousId);
-        startedAtRef.current = Date.now();
-        bindSessionTask(task.id);
-      } else {
-        bindSessionTask(task.id);
+        setError(null);
+        if (statusRef.current !== "running") setStatus("running");
+        return;
       }
-      setError(null);
-      return;
-    }
 
-    const resumable =
-      statusRef.current === "paused" &&
-      remainingRef.current > 0 &&
-      startedAtRef.current != null;
-    if (resumable) {
-      bindSessionTask(task.id, false);
+      // A break (running, paused, or waiting) starts a new focus pomodoro.
       setError(null);
+      finishingRef.current = true;
+      if (statusRef.current === "running" && endsAtRef.current != null) {
+        const left = secondsUntil(endsAtRef.current);
+        remainingRef.current = left;
+        setRemaining(left);
+      }
+      endsAtRef.current = null;
+      const hadClock = startedAtRef.current != null;
+      setStatus("idle");
+      if (hadClock) await persistSession(false);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      if (lastPlayTokenRef.current !== playToken) {
+        finishingRef.current = false;
+        return;
+      }
+      const current = selectedTaskRef.current;
+      if (!current) {
+        finishingRef.current = false;
+        return;
+      }
+      creditedTenthsRef.current = 0;
+      clearSessionClock();
+      const next = plannedFor("focus", settingsRef.current);
+      phaseRef.current = "focus";
+      plannedRef.current = next;
+      remainingRef.current = next;
+      startedAtRef.current = Date.now();
+      bindSessionTask(current.id);
+      setPhase("focus");
+      setRemaining(next);
+      finishingRef.current = false;
       setStatus("running");
-      return;
-    }
-
-    setError(null);
-    finishingRef.current = false;
-    if (startedAtRef.current != null) {
-      await persistSession(false);
-    }
-    creditedTenthsRef.current = 0;
-    startedAtRef.current = Date.now();
-    bindSessionTask(task.id);
-    setPhase("focus");
-    const next = plannedFor("focus", settingsRef.current);
-    plannedRef.current = next;
-    setRemaining(next);
-    setStatus("running");
     })();
   }, [playToken]);
 

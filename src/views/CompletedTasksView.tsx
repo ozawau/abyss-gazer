@@ -13,7 +13,10 @@ import {
   Category,
   createTask,
   deleteTask,
+  isTaskDeleted,
   listCategories,
+  purgeTask,
+  restoreTask as restoreDeletedTask,
   Task,
   updateTask,
 } from "../lib/api";
@@ -21,7 +24,6 @@ import {
   applyAncestorFields,
   ancestorTasks,
   formatTaskLineage,
-  removeTaskTree,
   taskById,
 } from "../lib/taskTree";
 import { isAndroidDevice } from "../lib/viewport";
@@ -31,6 +33,8 @@ const PAGE_SIZE = 15;
 
 interface CompletedTasksViewProps {
   tasks: Task[];
+  /** Completed tasks, or the deleted-task archive. The layout matches either way. */
+  list?: "completed" | "deleted";
   onTasksChange: (tasks: Task[]) => void;
   onOpenTemplate?: (templateId: string) => void;
   categoryFilter: string;
@@ -55,6 +59,7 @@ function endOfDayMs(ymd: string): number | null {
 
 export function CompletedTasksView({
   tasks,
+  list = "completed",
   onTasksChange,
   onOpenTemplate,
   categoryFilter,
@@ -117,17 +122,29 @@ export function CompletedTasksView({
 
   const tasksById = useMemo(() => taskById(tasks), [tasks]);
 
+  const inThisList = useMemo(() => {
+    return (task: Task) => {
+      if (list === "deleted") return isTaskDeleted(task);
+      return (
+        task.status === "done" &&
+        !isTaskDeleted(task) &&
+        !isInTemplateTree(task, tasksById)
+      );
+    };
+  }, [list, tasksById]);
+
   const completedChildCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const task of tasks) {
-      if (task.status !== "done" || isInTemplateTree(task, tasksById)) continue;
+      if (!inThisList(task)) continue;
       for (const ancestor of ancestorTasks(task, tasksById)) {
-        if (isInTemplateTree(ancestor, tasksById)) continue;
+        if (list !== "deleted" && isInTemplateTree(ancestor, tasksById)) continue;
+        if (list !== "deleted" && isTaskDeleted(ancestor)) continue;
         counts.set(ancestor.id, (counts.get(ancestor.id) ?? 0) + 1);
       }
     }
     return counts;
-  }, [tasks, tasksById]);
+  }, [tasks, tasksById, inThisList, list]);
 
   const parentChoices = useMemo(() => {
     return [...completedChildCounts.entries()]
@@ -155,7 +172,7 @@ export function CompletedTasksView({
     const createdEnd = endOfDayMs(createdTo);
 
     return tasks
-      .filter((t) => t.status === "done" && !isInTemplateTree(t, tasksById))
+      .filter((t) => inThisList(t))
       .filter((t) => {
         if (parentId) {
           const underParent = ancestorTasks(t, tasksById).some((item) => item.id === parentId);
@@ -170,21 +187,28 @@ export function CompletedTasksView({
         ) {
           return false;
         }
-        const completedAt = t.completed_at ?? t.updated_at;
-        if (completedStart != null && completedAt < completedStart) return false;
-        if (completedEnd != null && completedAt > completedEnd) return false;
+        const stamp =
+          list === "deleted"
+            ? (t.deleted_at ?? t.updated_at)
+            : (t.completed_at ?? t.updated_at);
+        if (completedStart != null && stamp < completedStart) return false;
+        if (completedEnd != null && stamp > completedEnd) return false;
         if (createdStart != null && t.created_at < createdStart) return false;
         if (createdEnd != null && t.created_at > createdEnd) return false;
         return true;
       })
       .sort((a, b) => {
-        const ac = a.completed_at ?? a.updated_at;
-        const bc = b.completed_at ?? b.updated_at;
-        return bc - ac;
+        const stamp = (task: Task) =>
+          list === "deleted"
+            ? (task.deleted_at ?? task.updated_at)
+            : (task.completed_at ?? task.updated_at);
+        return stamp(b) - stamp(a);
       });
   }, [
     tasks,
     tasksById,
+    inThisList,
+    list,
     parentId,
     titleQuery,
     categoryFilter,
@@ -226,8 +250,12 @@ export function CompletedTasksView({
     setBusy(true);
     setError(null);
     try {
-      const next = await updateTask({ id: task.id, status: "todo" });
-      onTasksChange(tasks.map((t) => (t.id === next.id ? next : t)));
+      if (list === "deleted") {
+        onTasksChange(await restoreDeletedTask(task.id));
+      } else {
+        const next = await updateTask({ id: task.id, status: "todo" });
+        onTasksChange(tasks.map((t) => (t.id === next.id ? next : t)));
+      }
     } catch (err) {
       setError(String(err));
     } finally {
@@ -241,8 +269,9 @@ export function CompletedTasksView({
     setBusy(true);
     setError(null);
     try {
-      await deleteTask(task.id);
-      onTasksChange(removeTaskTree(tasks, task.id));
+      const rows =
+        list === "deleted" ? await purgeTask(task.id) : await deleteTask(task.id);
+      onTasksChange(rows);
       setPendingDelete(null);
     } catch (err) {
       setError(String(err));
@@ -283,8 +312,8 @@ export function CompletedTasksView({
   return (
     <div className="view completed-tasks-view">
       <header className="view-header">
-        <h1>{t("completed.title")}</h1>
-        <p>{t("completed.hint")}</p>
+        <h1>{list === "deleted" ? t("deleted.title") : t("completed.title")}</h1>
+        <p>{list === "deleted" ? t("deleted.hint") : t("completed.hint")}</p>
       </header>
 
       <div className="completed-filters">
@@ -302,6 +331,9 @@ export function CompletedTasksView({
             value={parentId}
             choices={parentChoices}
             tasksById={tasksById}
+            matchLabel={
+              list === "deleted" ? "deleted.parentMatch" : "completed.parentMatch"
+            }
             onChange={setParentId}
           />
         </div>
@@ -321,20 +353,26 @@ export function CompletedTasksView({
           </select>
         </label>
         <div className="completed-filter-field">
-          <span>{t("completed.completedDate")}</span>
+          <span>
+            {list === "deleted" ? t("deleted.deletedDate") : t("completed.completedDate")}
+          </span>
           <div className="completed-date-range">
             <input
               type="date"
               value={completedFrom}
               onChange={(e) => setCompletedFrom(e.target.value)}
-              aria-label={t("completed.completedFrom")}
+              aria-label={
+                list === "deleted" ? t("deleted.deletedFrom") : t("completed.completedFrom")
+              }
             />
             <span className="completed-date-sep">{t("common.to")}</span>
             <input
               type="date"
               value={completedTo}
               onChange={(e) => setCompletedTo(e.target.value)}
-              aria-label={t("completed.completedTo")}
+              aria-label={
+                list === "deleted" ? t("deleted.deletedTo") : t("completed.completedTo")
+              }
             />
           </div>
         </div>
@@ -380,7 +418,9 @@ export function CompletedTasksView({
       </div>
 
       {pageItems.length === 0 ? (
-        <p className="completed-empty">{t("completed.empty")}</p>
+        <p className="completed-empty">
+          {list === "deleted" ? t("deleted.empty") : t("completed.empty")}
+        </p>
       ) : (
         <ul className="completed-list">
           {pageItems.map((task) => {
@@ -421,7 +461,13 @@ export function CompletedTasksView({
                       completed={task.completed_pomodoros ?? 0}
                     />
                     <span>
-                      {t("completed.finished", { time: formatDateTime(task.completed_at ?? task.updated_at, locale) })}
+                      {list === "deleted"
+                        ? t("deleted.removed", {
+                            time: formatDateTime(task.deleted_at ?? task.updated_at, locale),
+                          })
+                        : t("completed.finished", {
+                            time: formatDateTime(task.completed_at ?? task.updated_at, locale),
+                          })}
                     </span>
                     <span>{t("common.createdAt", { time: formatDateTime(task.created_at, locale) })}</span>
                   </div>
@@ -459,7 +505,7 @@ export function CompletedTasksView({
                     disabled={busy}
                     onClick={() => setPendingDelete(task)}
                   >
-                    {t("common.delete")}
+                    {list === "deleted" ? t("deleted.purge") : t("common.delete")}
                   </button>
                 </div>
               </li>
@@ -505,9 +551,17 @@ export function CompletedTasksView({
             aria-modal="true"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2>{t("common.deleteTask")}</h2>
+            <h2>{list === "deleted" ? t("deleted.purgeTask") : t("common.deleteTask")}</h2>
             <div className="delete-confirm">
-              <p>{t("common.deleteTaskBody", { title: pendingDelete.title })}</p>
+              <p>
+                {list === "deleted"
+                  ? tasks.some((task) => task.parent_id === pendingDelete.id)
+                    ? t("deleted.purgeTaskWithChildren", { title: pendingDelete.title })
+                    : t("deleted.purgeTaskBody", { title: pendingDelete.title })
+                  : tasks.some((task) => task.parent_id === pendingDelete.id)
+                    ? t("common.deleteTaskWithChildren", { title: pendingDelete.title })
+                    : t("common.deleteTaskBody", { title: pendingDelete.title })}
+              </p>
               <div className="delete-confirm-actions">
                 <button
                   type="button"
@@ -616,11 +670,13 @@ function ParentTaskPicker({
   value,
   choices,
   tasksById,
+  matchLabel,
   onChange,
 }: {
   value: string | null;
   choices: { task: Task; count: number }[];
   tasksById: Map<string, Task>;
+  matchLabel: "completed.parentMatch" | "deleted.parentMatch";
   onChange: (id: string | null) => void;
 }) {
   const { t } = useI18n();
@@ -766,7 +822,7 @@ function ParentTaskPicker({
                     onClick={() => choose(choice.task.id)}
                   >
                     <span>{formatTaskLineage(choice.task, tasksById)}</span>
-                    <small>{t("completed.parentMatch", { count: choice.count })}</small>
+                    <small>{t(matchLabel, { count: choice.count })}</small>
                   </button>
                 ))
               )}
