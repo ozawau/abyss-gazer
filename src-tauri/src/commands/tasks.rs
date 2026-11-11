@@ -25,6 +25,8 @@ pub struct Task {
     pub recurrence_occurrence: Option<String>,
     /// `null` means the habit is due every day. Otherwise a JSON array of weekday numbers, Sunday = 0.
     pub checkin_weekdays: Option<String>,
+    /// Set when the task is in the deleted list. `None` means it is still live.
+    pub deleted_at: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,13 +138,15 @@ fn map_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         recurrence_source_id: row.get(15)?,
         recurrence_occurrence: row.get(16)?,
         checkin_weekdays: row.get(17)?,
-        completed_pomodoros: row.get(18)?,
+        deleted_at: row.get(18)?,
+        completed_pomodoros: row.get(19)?,
     })
 }
 
 const TASK_SELECT: &str = "SELECT t.id, t.title, t.notes, t.status, t.priority, t.sort_order,
        t.parent_id, t.category_id, t.estimate_pomodoros, t.due_at, t.start_at, t.completed_at, t.created_at, t.updated_at,
        t.recurrence, t.recurrence_source_id, t.recurrence_occurrence, t.checkin_weekdays,
+       t.deleted_at,
        CAST(COALESCE((SELECT SUM(p.credit) FROM pomodoro_sessions p
          WHERE p.kind = 'focus' AND p.completed = 1
            AND p.task_id IN (
@@ -714,18 +718,88 @@ pub fn reorder_task(
     list_tasks_ordered(&conn)
 }
 
+fn subtree_ids(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>, String> {
+    let mut ids = collect_descendant_ids(conn, id)?;
+    ids.push(id.to_string());
+    Ok(ids)
+}
+
+fn next_updated_at(conn: &rusqlite::Connection, ids: &[String]) -> Result<i64, String> {
+    let mut previous = 0_i64;
+    for id in ids {
+        let ts: i64 = conn
+            .query_row(
+                "SELECT updated_at FROM tasks WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if ts > previous {
+            previous = ts;
+        }
+    }
+    Ok(monotonic_updated_at(previous))
+}
+
+/// Move a task and its subtasks into the deleted list. The rows stay until purged.
 #[tauri::command]
-pub fn delete_task(db: State<'_, DbState>, id: String) -> Result<(), String> {
+pub fn delete_task(db: State<'_, DbState>, id: String) -> Result<Vec<Task>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     fetch_task(&conn, &id)?;
-    let mut ids = collect_descendant_ids(&conn, &id)?;
-    ids.push(id);
-    for task_id in ids.into_iter().rev() {
-        conn.execute("DELETE FROM tasks WHERE id = ?1", [&task_id])
-            .map_err(|e| e.to_string())?;
-        crate::sync_logical::record_tombstone(&conn, "task", &task_id)?;
+    let ids = subtree_ids(&conn, &id)?;
+    let stamp = next_updated_at(&conn, &ids)?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for task_id in &ids {
+        tx.execute(
+            "UPDATE tasks SET deleted_at = COALESCE(deleted_at, ?1), updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![stamp, task_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
-    Ok(())
+    tx.commit().map_err(|e| e.to_string())?;
+    list_tasks_ordered(&conn)
+}
+
+/// Put a deleted task back, including deleted ancestors and subtasks so it can show up again.
+#[tauri::command]
+pub fn restore_task(db: State<'_, DbState>, id: String) -> Result<Vec<Task>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let task = fetch_task(&conn, &id)?;
+    let mut ids = subtree_ids(&conn, &id)?;
+    let mut parent_id = task.parent_id;
+    while let Some(pid) = parent_id {
+        let parent = fetch_task(&conn, &pid)?;
+        ids.push(pid);
+        parent_id = parent.parent_id;
+    }
+    let stamp = next_updated_at(&conn, &ids)?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for task_id in &ids {
+        tx.execute(
+            "UPDATE tasks SET deleted_at = NULL, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![stamp, task_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    list_tasks_ordered(&conn)
+}
+
+/// Remove a deleted task and its subtasks for good.
+#[tauri::command]
+pub fn purge_task(db: State<'_, DbState>, id: String) -> Result<Vec<Task>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    fetch_task(&conn, &id)?;
+    let mut ids = subtree_ids(&conn, &id)?;
+    ids.reverse();
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for task_id in &ids {
+        tx.execute("DELETE FROM tasks WHERE id = ?1", [task_id])
+            .map_err(|e| e.to_string())?;
+        crate::sync_logical::record_tombstone(&tx, "task", task_id)?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    list_tasks_ordered(&conn)
 }
 
 #[tauri::command]
@@ -934,6 +1008,9 @@ fn spawn_recurring_task(
         Ok(task) => task,
         Err(_) => return Ok(None),
     };
+    if template.deleted_at.is_some() {
+        return Ok(None);
+    }
     let id = recurrence_instance_id(template_id, occurrence);
     let tombstoned: bool = conn
         .query_row(

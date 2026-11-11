@@ -376,7 +376,7 @@ fn build_snapshot(
     {
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, parent_id, category_id, sort_order, created_at, checkin_weekdays FROM tasks",
+                "SELECT id, title, parent_id, category_id, sort_order, created_at, checkin_weekdays FROM tasks WHERE deleted_at IS NULL",
             )
             .map_err(|err| err.to_string())?;
         let rows = stmt

@@ -11,13 +11,14 @@ import {
   Category,
   createTask,
   deleteTask,
+  isTaskDeleted,
   listCategories,
   Task,
   updateTask,
 } from "../lib/api";
 import { isTaskUpcoming } from "../lib/taskSchedule";
 import { isInTemplateTree } from "../lib/taskRecurrence";
-import { applyAncestorFields, ancestorTasks, removeTaskTree, taskById } from "../lib/taskTree";
+import { applyAncestorFields, ancestorTasks, taskById } from "../lib/taskTree";
 import { isAndroidDevice } from "../lib/viewport";
 
 const PAGE_SIZE = 15;
@@ -123,7 +124,12 @@ export function UpcomingTasksView({
     const createdEnd = endOfDayMs(createdTo);
 
     return tasks
-      .filter((t) => isTaskUpcoming(t, nowMs) && !isInTemplateTree(t, tasksById))
+      .filter(
+        (t) =>
+          !isTaskDeleted(t) &&
+          isTaskUpcoming(t, nowMs) &&
+          !isInTemplateTree(t, tasksById),
+      )
       .filter((t) => {
         if (q && !t.title.toLowerCase().includes(q)) return false;
         if (categoryFilter === "none" && t.category_id) return false;
@@ -200,8 +206,7 @@ export function UpcomingTasksView({
     setBusy(true);
     setError(null);
     try {
-      await deleteTask(task.id);
-      onTasksChange(removeTaskTree(tasks, task.id));
+      onTasksChange(await deleteTask(task.id));
       setPendingDelete(null);
     } catch (err) {
       setError(String(err));
@@ -436,7 +441,11 @@ export function UpcomingTasksView({
           >
             <h2>{t("common.deleteTask")}</h2>
             <div className="delete-confirm">
-              <p>{t("common.deleteTaskBody", { title: pendingDelete.title })}</p>
+              <p>
+                {tasks.some((task) => task.parent_id === pendingDelete.id)
+                  ? t("common.deleteTaskWithChildren", { title: pendingDelete.title })
+                  : t("common.deleteTaskBody", { title: pendingDelete.title })}
+              </p>
               <div className="delete-confirm-actions">
                 <button
                   type="button"

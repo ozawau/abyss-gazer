@@ -321,7 +321,15 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark" aria-hidden />
+        <img
+          className="brand-mark"
+          src="/brand-mark.png"
+          alt=""
+          width={32}
+          height={32}
+          decoding="async"
+          aria-hidden
+        />
         <div className="brand-text">
           <span className="brand-name">Abyss Gazer</span>
           <span className="brand-tag">Focus & Tasks</span>

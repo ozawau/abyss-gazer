@@ -22,6 +22,7 @@ import {
   PomodoroSession,
   saveHabitCheckin,
   SystemSettings,
+  isTaskDeleted,
   Task,
   updateTask,
 } from "../lib/api";
@@ -224,7 +225,7 @@ export function CheckinView({
   const habits = useMemo(
     () =>
       tasks
-        .filter((task) => isCheckinRootTask(task, checkinCategoryId))
+        .filter((task) => !isTaskDeleted(task) && isCheckinRootTask(task, checkinCategoryId))
         .sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title, "zh")),
     [tasks, checkinCategoryId],
   );
