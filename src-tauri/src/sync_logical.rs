@@ -176,20 +176,35 @@ pub fn ensure_data_gitignore(data_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn git_command_hidden() -> std::process::Command {
+    let mut cmd = std::process::Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 pub fn untrack_database_from_git(data_dir: &Path) -> Result<(), String> {
     if !data_dir.join(".git").exists() {
         return Ok(());
     }
-    let _ = std::process::Command::new("git")
+    let _ = git_command_hidden()
         .args(["rm", "--cached", "-f", "abyss.db"])
         .current_dir(data_dir)
         .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status();
     for name in ["abyss.db-wal", "abyss.db-shm", "abyss.db-journal"] {
-        let _ = std::process::Command::new("git")
+        let _ = git_command_hidden()
             .args(["rm", "--cached", "-f", name])
             .current_dir(data_dir)
             .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status();
     }
     Ok(())
@@ -200,8 +215,9 @@ pub fn import_logical(conn: &Connection, data_dir: &Path) -> Result<(), String> 
     if !root.join("VERSION").is_file() {
         return Ok(());
     }
-    import_tasks(conn, &root)?;
+    // Categories before tasks: tasks.category_id has a FK to categories(id).
     import_categories(conn, &root)?;
+    import_tasks(conn, &root)?;
     import_pomodoro_sessions(conn, &root)?;
     import_habit_checkins(conn, &root)?;
     import_habit_checkin_items(conn, &root)?;
@@ -323,6 +339,17 @@ fn task_exists(conn: &Connection, id: &str) -> Result<bool, String> {
     Ok(n != 0)
 }
 
+fn category_exists(conn: &Connection, id: &str) -> Result<bool, String> {
+    let n: i64 = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM categories WHERE id = ?1)",
+            [id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n != 0)
+}
+
 fn local_task_extensions(
     conn: &Connection,
     id: &str,
@@ -371,6 +398,11 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
     let recurrence_source_id = t.recurrence_source_id.merge(local_ext.1, remote_wins);
     let recurrence_occurrence = t.recurrence_occurrence.merge(local_ext.2, remote_wins);
     let checkin_weekdays = t.checkin_weekdays.merge(local_ext.3, remote_wins);
+    // Dangling category refs must not abort the whole sync (partial trees / race).
+    let category_id = match t.category_id.as_ref() {
+        Some(cid) if category_exists(conn, cid)? => Some(cid.clone()),
+        _ => None,
+    };
     if !remote_wins {
         // Same timestamp: only fill extension fields that local is still missing.
         conn.execute(
@@ -413,7 +445,7 @@ fn apply_task(conn: &Connection, env: &SyncEnvelope<SyncTask>) -> Result<(), Str
             t.priority,
             t.sort_order,
             t.parent_id,
-            t.category_id,
+            category_id,
             t.estimate_pomodoros,
             t.due_at,
             t.start_at,
@@ -1249,6 +1281,66 @@ mod tests {
             )
             .unwrap();
         assert_eq!(left, 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn import_task_with_category_does_not_fk_fail() {
+        let dir = std::env::temp_dir().join(format!(
+            "abyss-sync-cat-before-task-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("sync/categories")).unwrap();
+        std::fs::create_dir_all(dir.join("sync/tasks")).unwrap();
+        std::fs::write(dir.join("sync/VERSION"), "1\n").unwrap();
+        let cat = SyncEnvelope {
+            v: SYNC_FORMAT_VERSION,
+            updated_at: 100,
+            deleted: false,
+            data: Some(SyncCategory {
+                id: "c1".into(),
+                name: "Work".into(),
+                color: "#112233".into(),
+                created_at: 50,
+                updated_at: 100,
+            }),
+        };
+        write_json(&dir.join("sync/categories/c1.json"), &cat).unwrap();
+        let task = SyncEnvelope {
+            v: SYNC_FORMAT_VERSION,
+            updated_at: 200,
+            deleted: false,
+            data: Some(SyncTask {
+                id: "t1".into(),
+                title: "Has category".into(),
+                notes: String::new(),
+                status: "todo".into(),
+                priority: "medium".into(),
+                sort_order: 0,
+                parent_id: None,
+                category_id: Some("c1".into()),
+                estimate_pomodoros: 0,
+                due_at: None,
+                start_at: None,
+                completed_at: None,
+                created_at: 150,
+                updated_at: 200,
+                recurrence: FieldUpdate::Absent,
+                recurrence_source_id: FieldUpdate::Absent,
+                recurrence_occurrence: FieldUpdate::Absent,
+                checkin_weekdays: FieldUpdate::Absent,
+            }),
+        };
+        write_json(&dir.join("sync/tasks/t1.json"), &task).unwrap();
+        let conn = open_db(&dir.join("abyss.db")).expect("open");
+        import_logical(&conn, &dir).expect("import must not FK-fail");
+        let cat_id: String = conn
+            .query_row("SELECT category_id FROM tasks WHERE id = 't1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cat_id, "c1");
         let _ = std::fs::remove_dir_all(dir);
     }
 

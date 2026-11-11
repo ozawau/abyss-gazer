@@ -86,6 +86,13 @@ fn run_git(
         .env("GCM_INTERACTIVE", "Never")
         .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         .env("GIT_EDITOR", "true");
+    #[cfg(windows)]
+    {
+        // GUI app: avoid a console flash for every git subprocess.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     if let Some(proxy) = proxy {
         cmd.env("http_proxy", proxy)
             .env("https_proxy", proxy)
