@@ -221,8 +221,9 @@ textarea {
   width: 2rem;
   height: 2rem;
   border-radius: 8px;
-  background:
-    linear-gradient(145deg, var(--accent) 0%, #1d4ed8 55%, #1e3a8a 100%);
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
 }
 
